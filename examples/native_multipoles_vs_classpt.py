@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import EFTBiasParams, PTSettings, compute_basis, galaxy_multipoles
+from jaxpt import EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
 from jaxpt.cosmology import build_classpt_native_grid_parity_linear_input_from_classy
 
 
@@ -87,8 +87,9 @@ def main() -> None:
     # backend parity rather than the default native `pk_lin` input convention.
     settings = PTSettings(ir_resummation=False)
     linear_input = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
-    basis = compute_basis(linear_input, settings=settings, k=EVAL_K)
-    native = galaxy_multipoles(basis, params)
+    template = PowerSpectrumTemplate.from_linear_input(linear_input, settings=settings)
+    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=EVAL_K)
+    native = theory(params)
 
     cosmo.initialize_output(EVAL_K, z, len(EVAL_K))
     classpt_p0 = np.asarray(cosmo.pk_gg_l0(params.b1, params.b2, params.bG2, params.bGamma3, params.cs0, params.Pshot, params.b4))
