@@ -12,6 +12,7 @@ from .cosmology import LinearPowerInput
 from .kernels.spectral import _loglog_interpolate_jax, compute_native_realspace_terms_from_arrays
 from .native import compute_basis as _compute_basis
 from .reference.classpt import BasisSpectra
+from .theory import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
 
 
 def compute_basis(linear_input: LinearPowerInput, settings: PTSettings | None = None, k: np.ndarray | None = None) -> BasisSpectra:
@@ -134,6 +135,13 @@ def predict_galaxy_multipoles(
     settings: PTSettings | None = None,
     return_components: bool = False,
 ):
+    if isinstance(source, GalaxyPowerSpectrumMultipolesTheory):
+        if params is None:
+            if not args:
+                raise TypeError("predict_galaxy_multipoles requires params when called with a GalaxyPowerSpectrumMultipolesTheory source.")
+            params = args[0]
+        return source(params, return_components=return_components)
+
     if isinstance(source, BasisSpectra):
         if params is None:
             if not args:
@@ -145,10 +153,15 @@ def predict_galaxy_multipoles(
             if not args:
                 raise TypeError("predict_galaxy_multipoles requires params when called with a LinearPowerInput source.")
             params = args[0]
-        basis = compute_basis(linear_input=source, settings=settings)
+        theory = GalaxyPowerSpectrumMultipolesTheory(
+            template=PowerSpectrumTemplate.from_linear_input(source, settings=settings),
+            k=np.asarray(source.k, dtype=float),
+            return_components=return_components,
+        )
+        return theory(params, return_components=return_components)
     else:
         raise TypeError(
-            "predict_galaxy_multipoles only accepts BasisSpectra or LinearPowerInput. "
+            "predict_galaxy_multipoles only accepts GalaxyPowerSpectrumMultipolesTheory, BasisSpectra, or LinearPowerInput. "
             "Use build_linear_input_from_classy(...) before calling it."
         )
 

@@ -3,7 +3,17 @@ import pytest
 from classy import Class
 from unittest.mock import patch
 
-from jaxpt import EFTBiasParams, LinearPowerInput, PTSettings, build_linear_input_from_classy, compute_basis, galaxy_multipoles, predict_galaxy_multipoles
+from jaxpt import (
+    EFTBiasParams,
+    GalaxyPowerSpectrumMultipolesTheory,
+    LinearPowerInput,
+    PTSettings,
+    PowerSpectrumTemplate,
+    build_linear_input_from_classy,
+    compute_basis,
+    galaxy_multipoles,
+    predict_galaxy_multipoles,
+)
 from jaxpt.cosmology import (
     build_classpt_native_grid_parity_linear_input_from_classy,
     build_classpt_parity_linear_input_from_classy,
@@ -179,6 +189,135 @@ def test_linear_power_input_validates_shapes() -> None:
         )
 
 
+def test_power_spectrum_template_from_linear_input_preserves_state() -> None:
+    linear_input = LinearPowerInput(
+        k=np.logspace(-3, -1, 8),
+        pk_linear=np.linspace(100.0, 200.0, 8),
+        z=0.5,
+        growth_factor=0.75,
+        growth_rate=0.8,
+        h=0.7,
+    )
+    settings = PTSettings(loop_order="tree", ir_resummation=False)
+
+    template = PowerSpectrumTemplate.from_linear_input(
+        linear_input,
+        settings=settings,
+        metadata={"name": "test-template"},
+    )
+
+    assert template.linear_input is linear_input
+    assert template.settings is settings
+    assert template.z == linear_input.z
+    assert template.metadata["name"] == "test-template"
+
+
+def test_power_spectrum_template_from_classy_matches_existing_builder() -> None:
+    z = 0.5
+    k = np.logspace(-3, -1, 8)
+    settings = PTSettings(ir_resummation=False)
+
+    cosmo = Class()
+    cosmo.set(
+        {
+            "A_s": 2.089e-9,
+            "n_s": 0.9649,
+            "tau_reio": 0.052,
+            "omega_b": 0.02237,
+            "omega_cdm": 0.12,
+            "h": 0.6736,
+            "YHe": 0.2425,
+            "N_ur": 2.0328,
+            "N_ncdm": 1,
+            "m_ncdm": 0.06,
+            "z_pk": z,
+            "output": "mPk",
+        }
+    )
+    cosmo.compute()
+
+    expected = build_linear_input_from_classy(cosmo, z=z, k=k)
+    template = PowerSpectrumTemplate.from_classy(cosmo, z=z, k=k, settings=settings)
+
+    np.testing.assert_allclose(template.linear_input.k, expected.k)
+    np.testing.assert_allclose(template.linear_input.pk_linear, expected.pk_linear)
+    np.testing.assert_allclose(template.linear_input.transfer_linear, expected.transfer_linear)
+    assert template.settings is settings
+
+
+def test_galaxy_power_spectrum_multipoles_theory_matches_functional_path() -> None:
+    k = np.logspace(-3, -1, 16)
+    eval_k = np.linspace(0.01, 0.08, 9)
+    linear_input = LinearPowerInput(
+        k=k,
+        pk_linear=np.linspace(100.0, 200.0, k.size),
+        z=0.5,
+        growth_factor=0.75,
+        growth_rate=0.8,
+        h=0.7,
+    )
+    settings = PTSettings(ir_resummation=False)
+    params = {
+        "b1": 2.0,
+        "b2": -1.0,
+        "bG2": 0.1,
+        "bGamma3": -0.1,
+        "cs0": 0.0,
+        "cs2": 30.0,
+        "cs4": 0.0,
+        "Pshot": 3000.0,
+        "b4": 10.0,
+    }
+
+    theory = GalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(linear_input, settings=settings),
+        k=eval_k,
+    )
+    expected = galaxy_multipoles(compute_basis(linear_input, settings=settings, k=eval_k), EFTBiasParams(**params))
+    prediction = theory(params)
+
+    np.testing.assert_allclose(np.asarray(prediction.k), np.asarray(expected.k))
+    np.testing.assert_allclose(np.asarray(prediction.p0), np.asarray(expected.p0))
+    np.testing.assert_allclose(np.asarray(prediction.p2), np.asarray(expected.p2))
+    np.testing.assert_allclose(np.asarray(prediction.p4), np.asarray(expected.p4))
+    assert prediction.metadata["theory"] == "GalaxyPowerSpectrumMultipolesTheory"
+    assert prediction.metadata["template"] == "PowerSpectrumTemplate"
+
+
+def test_galaxy_power_spectrum_multipoles_theory_rejects_invalid_mapping() -> None:
+    linear_input = LinearPowerInput(
+        k=np.logspace(-3, -1, 8),
+        pk_linear=np.linspace(100.0, 200.0, 8),
+        z=0.5,
+        growth_factor=0.75,
+        growth_rate=0.8,
+        h=0.7,
+    )
+    theory = GalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(linear_input, settings=PTSettings(ir_resummation=False)),
+        k=np.linspace(0.01, 0.08, 6),
+    )
+
+    with pytest.raises(ValueError, match="missing required parameters"):
+        theory({"b1": 2.0})
+
+    with pytest.raises(ValueError, match="unexpected parameters"):
+        theory(
+            {
+                "b1": 2.0,
+                "b2": -1.0,
+                "bG2": 0.1,
+                "bGamma3": -0.1,
+                "cs0": 0.0,
+                "cs2": 30.0,
+                "cs4": 0.0,
+                "Pshot": 3000.0,
+                "b4": 10.0,
+                "extra": 1.0,
+            }
+        )
+
+
 def test_native_tree_loop_order_matches_kaiser_prediction() -> None:
     k = np.logspace(-3, -1, 8)
     pk_linear = np.linspace(100.0, 200.0, k.size)
@@ -318,3 +457,24 @@ def test_predict_galaxy_multipoles_rejects_cosmology_object_source() -> None:
     params = EFTBiasParams(b1=2.0, b2=0.0, bG2=0.0, bGamma3=0.0, cs0=0.0, cs2=0.0, cs4=0.0, Pshot=0.0, b4=0.0)
     with pytest.raises(TypeError, match="build_linear_input_from_classy"):
         predict_galaxy_multipoles(cosmo, np.logspace(-3, -1, 8), z, params)
+
+
+def test_predict_galaxy_multipoles_accepts_theory_source() -> None:
+    linear_input = LinearPowerInput(
+        k=np.logspace(-3, -1, 16),
+        pk_linear=np.linspace(100.0, 200.0, 16),
+        z=0.5,
+        growth_factor=0.75,
+        growth_rate=0.8,
+        h=0.7,
+    )
+    params = EFTBiasParams(b1=2.0, b2=0.0, bG2=0.0, bGamma3=0.0, cs0=0.0, cs2=0.0, cs4=0.0, Pshot=0.0, b4=0.0)
+    theory = GalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(linear_input, settings=PTSettings(ir_resummation=False)),
+        k=np.linspace(0.01, 0.08, 8),
+    )
+
+    prediction = predict_galaxy_multipoles(theory, params)
+
+    assert prediction.p0.shape == theory.k.shape
+    assert prediction.metadata["theory"] == "GalaxyPowerSpectrumMultipolesTheory"

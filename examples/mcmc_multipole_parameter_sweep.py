@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import EFTBiasParams, PTSettings, build_linear_input_from_classy, compute_basis, galaxy_multipoles
+from jaxpt import EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -92,7 +92,7 @@ NUISANCE_SAMPLES = [
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Show the current jaxpt API flow for MCMC-style multipole predictions with varying cosmology and nuisance parameters."
+        description="Show the object-oriented jaxpt API flow for MCMC-style multipole predictions with varying cosmology and nuisance parameters."
     )
     parser.add_argument("--z", type=float, default=0.5, help="Redshift at which to evaluate the predictions.")
     parser.add_argument("--kmin", type=float, default=0.01, help="Minimum evaluation k in 1/Mpc.")
@@ -125,7 +125,7 @@ def build_classy(cosmology: dict[str, float], *, z: float) -> Class:
     return cosmo
 
 
-def predict_with_current_api(
+def predict_with_theory_api(
     cosmology: dict[str, float],
     nuisance: EFTBiasParams,
     *,
@@ -134,14 +134,14 @@ def predict_with_current_api(
     eval_k: np.ndarray,
     settings: PTSettings,
 ):
-    # This is the sampler-facing workflow today: the caller owns the CLASS
-    # object, converts it into LinearPowerInput, then builds a basis and only
-    # then assembles the observable from nuisance parameters.
+    # Sampler-facing workflow after the OOP redesign: build a cosmology-side
+    # template once, feed it into a theory object, and evaluate that theory for
+    # each nuisance-parameter sample.
     cosmo = build_classy(cosmology, z=z)
-    linear_input = build_linear_input_from_classy(cosmo, z=z, k=support_k)
-    basis = compute_basis(linear_input, settings=settings, k=eval_k)
-    prediction = galaxy_multipoles(basis, nuisance)
-    return prediction, linear_input, basis
+    template = PowerSpectrumTemplate.from_classy(cosmo, z=z, k=support_k, settings=settings)
+    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
+    prediction = theory(nuisance)
+    return prediction, template, theory
 
 
 def fractional_delta(values: np.ndarray, reference: np.ndarray) -> np.ndarray:
@@ -172,7 +172,7 @@ def main() -> None:
 
     for label, overrides in COSMOLOGY_SAMPLES:
         t0 = time.perf_counter()
-        prediction, _, _ = predict_with_current_api(
+        prediction, _, _ = predict_with_theory_api(
             {**FIDUCIAL_COSMOLOGY, **overrides},
             fiducial_nuisance,
             z=args.z,
@@ -183,9 +183,9 @@ def main() -> None:
         cosmology_timings.append((label, time.perf_counter() - t0))
         cosmology_predictions.append((label, prediction))
 
-    # When cosmology is fixed, the expensive state can be reused from the basis
-    # onward. This is the cheaper nuisance-only loop available in the API today.
-    fiducial_prediction, _, fiducial_basis = predict_with_current_api(
+    # When cosmology is fixed, the expensive state is encapsulated in the
+    # template/theory pair and only nuisance parameters vary between calls.
+    fiducial_prediction, _, fiducial_theory = predict_with_theory_api(
         FIDUCIAL_COSMOLOGY,
         fiducial_nuisance,
         z=args.z,
@@ -198,16 +198,16 @@ def main() -> None:
 
     for label, params in NUISANCE_SAMPLES[1:]:
         t0 = time.perf_counter()
-        prediction = galaxy_multipoles(fiducial_basis, params)
+        prediction = fiducial_theory(params)
         nuisance_timings.append((label, time.perf_counter() - t0))
         nuisance_predictions.append((label, prediction))
 
-    print("Cosmology-varying loop: rebuild classy, LinearPowerInput, and BasisSpectra each sample")
+    print("Cosmology-varying loop: rebuild classy, PowerSpectrumTemplate, and theory each sample")
     for (label, elapsed), (_, prediction) in zip(cosmology_timings, cosmology_predictions, strict=True):
         print(format_summary_row(label, elapsed, prediction))
 
     print()
-    print("Nuisance-only loop: reuse fixed BasisSpectra and re-run only galaxy_multipoles")
+    print("Nuisance-only loop: reuse fixed GalaxyPowerSpectrumMultipolesTheory and vary only nuisance parameters")
     for (label, elapsed), (_, prediction) in zip(nuisance_timings, nuisance_predictions, strict=True):
         print(format_summary_row(label, elapsed, prediction))
 
@@ -247,8 +247,8 @@ def main() -> None:
 
     axes[0, 0].legend(loc="best")
     figure.suptitle(
-        "Current jaxpt MCMC-Oriented Call Pattern\n"
-        "Top: full cosmology updates, Bottom: nuisance-only updates with basis reuse"
+        "Object-Oriented jaxpt MCMC Call Pattern\n"
+        "Top: full cosmology updates, Bottom: nuisance-only updates with theory reuse"
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
