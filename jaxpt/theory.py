@@ -23,6 +23,7 @@ _EFT_PARAM_NAMES = tuple(param.name for param in fields(EFTBiasParams))
 
 
 def _normalize_eft_params(parameters: EFTBiasParams | Mapping[str, float]) -> EFTBiasParams:
+    """Normalize mapping-style parameter inputs into `EFTBiasParams`."""
     if isinstance(parameters, EFTBiasParams):
         return parameters
     if not isinstance(parameters, Mapping):
@@ -42,6 +43,7 @@ def _normalize_eft_params(parameters: EFTBiasParams | Mapping[str, float]) -> EF
 
 
 def _default_support_k(settings: PTSettings) -> np.ndarray:
+    """Return the default support grid used when a template is built from a cosmology object."""
     return np.logspace(-5.0, 1.0, int(settings.integration_nk))
 
 
@@ -61,6 +63,7 @@ def _build_template_linear_input(
     settings: PTSettings,
     input_recipe: str | None,
 ) -> LinearPowerInput:
+    """Build a normalized `LinearPowerInput` from either a linear input or a supported cosmology object."""
     if isinstance(source, LinearPowerInput):
         if z is not None and not np.isclose(float(z), float(source.z)):
             raise ValueError("PowerSpectrumTemplate z must match LinearPowerInput.z when both are provided.")
@@ -133,6 +136,35 @@ def _require_classpt_cosmo(template: "PowerSpectrumTemplate", theory_name: str):
 
 @dataclass(frozen=True, slots=True, init=False)
 class PowerSpectrumTemplate:
+    """Normalized cosmology-side inputs for galaxy power-spectrum theory.
+
+    The constructor accepts either an already-built `LinearPowerInput` or a
+    supported cosmology object. When a cosmology object is provided, the
+    template builds the internal linear input automatically using the matching
+    adapter.
+
+    Parameters
+    ----------
+    source
+        Either a `LinearPowerInput`, a `classy.Class`-like object, or a
+        `cosmoprimo.Cosmology`-like object.
+    z
+        Redshift used when constructing the template from a cosmology object.
+        Ignored unless validated against `LinearPowerInput.z` when `source` is
+        already normalized.
+    k
+        Optional support grid for cosmology-backed templates. If omitted, the
+        template uses a default log-spaced grid controlled by
+        `settings.integration_nk`.
+    settings
+        Numerical and physical settings shared with the theory object.
+    input_recipe
+        Optional expert override for `classy`-backed templates. Supported
+        values are `"linear_pk"`, `"classpt_parity"`, and
+        `"classpt_native_grid_parity"`.
+    metadata
+        Extra user metadata stored on the template.
+    """
     linear_input: LinearPowerInput
     settings: PTSettings = field(default_factory=PTSettings)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -147,6 +179,7 @@ class PowerSpectrumTemplate:
         input_recipe: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> None:
+        """Construct a normalized template from linear inputs or cosmology objects."""
         normalized_settings = PTSettings() if settings is None else settings
         linear_input = _build_template_linear_input(
             source,
@@ -167,6 +200,7 @@ class PowerSpectrumTemplate:
         settings: PTSettings | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> PowerSpectrumTemplate:
+        """Build a template explicitly from a precomputed `LinearPowerInput`."""
         return cls(linear_input, settings=settings, metadata=metadata)
 
     @classmethod
@@ -180,6 +214,7 @@ class PowerSpectrumTemplate:
         input_recipe: str | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> PowerSpectrumTemplate:
+        """Build a template from a live `classy` cosmology object."""
         return cls(cosmo, z=z, k=k, settings=settings, input_recipe=input_recipe, metadata=metadata)
 
     @classmethod
@@ -192,6 +227,7 @@ class PowerSpectrumTemplate:
         settings: PTSettings | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> PowerSpectrumTemplate:
+        """Build a template from a `cosmoprimo` cosmology object."""
         return cls(cosmo, z=z, k=k, settings=settings, metadata=metadata)
 
     @property
@@ -201,12 +237,19 @@ class PowerSpectrumTemplate:
 
 @dataclass(frozen=True, slots=True)
 class GalaxyPowerSpectrumMultipolesTheory:
+    """Native galaxy multipole theory evaluated from a normalized template.
+
+    This is the default multipole theory surface. It precomputes the native
+    basis on the requested evaluation grid and reuses that state across
+    repeated nuisance-parameter evaluations.
+    """
     template: PowerSpectrumTemplate
     k: np.ndarray
     return_components: bool = False
     basis: BasisSpectra | None = field(init=False)
 
     def __post_init__(self) -> None:
+        """Validate the evaluation grid and prepare the native basis."""
         eval_k = np.asarray(self.k, dtype=float)
         if eval_k.ndim != 1:
             raise ValueError("GalaxyPowerSpectrumMultipolesTheory.k must be a one-dimensional array.")
@@ -230,6 +273,7 @@ class GalaxyPowerSpectrumMultipolesTheory:
         *,
         return_components: bool | None = None,
     ) -> MultipolePrediction:
+        """Evaluate galaxy multipoles for a set of EFT bias parameters."""
         params = _normalize_eft_params(parameters)
         requested_components = self.return_components if return_components is None else return_components
         if self.template.settings.backend == "classpt":
@@ -271,11 +315,18 @@ class GalaxyPowerSpectrumMultipolesTheory:
 
 @dataclass(frozen=True, slots=True)
 class ClassPTGalaxyPowerSpectrumMultipolesTheory:
+    """Direct `CLASS-PT` multipole theory evaluated through the shared API.
+
+    Unlike the native theory class, this class does not precompute a native
+    basis. It forwards evaluations to the live `classy` object stored in the
+    template's linear-input metadata.
+    """
     template: PowerSpectrumTemplate
     k: np.ndarray
     return_components: bool = False
 
     def __post_init__(self) -> None:
+        """Validate the evaluation grid and require a live `classy` cosmology."""
         eval_k = np.asarray(self.k, dtype=float)
         if eval_k.ndim != 1:
             raise ValueError("ClassPTGalaxyPowerSpectrumMultipolesTheory.k must be a one-dimensional array.")
@@ -288,6 +339,7 @@ class ClassPTGalaxyPowerSpectrumMultipolesTheory:
         *,
         return_components: bool | None = None,
     ) -> MultipolePrediction:
+        """Evaluate direct `CLASS-PT` multipoles for a set of EFT bias parameters."""
         params = _normalize_eft_params(parameters)
         requested_components = self.return_components if return_components is None else return_components
         if requested_components:
