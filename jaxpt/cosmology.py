@@ -171,6 +171,40 @@ def build_linear_input_from_classy(cosmo: Any, z: float, k: np.ndarray) -> Linea
     )
 
 
+def build_linear_input_from_cosmoprimo(cosmo: Any, z: float, k: np.ndarray) -> LinearPowerInput:
+    """Build a linear-input container from a `cosmoprimo.Cosmology` instance."""
+    engine = getattr(cosmo, "engine", None)
+    if engine is None:
+        raise ValueError("build_linear_input_from_cosmoprimo requires a cosmoprimo cosmology with an attached engine.")
+
+    k = np.asarray(k, dtype=float)
+    h = float(cosmo["h"])
+    fourier = cosmo.get_fourier()
+    background = cosmo.get_background()
+    pk_interpolator = fourier.pk_interpolator(non_linear=False, of="delta_cb").to_1d(z=float(z))
+    pk_linear = np.asarray(pk_interpolator(k / h), dtype=float) / h**3
+
+    primordial_pk = _primordial_power_spectrum_from_classy_params(k, cosmo.get_params())
+    transfer_linear = None if primordial_pk is None else (5.0 / 3.0) * np.sqrt(pk_linear / primordial_pk)
+    return LinearPowerInput(
+        k=k,
+        pk_linear=pk_linear,
+        transfer_linear=transfer_linear,
+        z=float(z),
+        growth_factor=float(background.growth_factor(float(z))),
+        growth_rate=float(background.growth_rate(float(z))),
+        h=h,
+        metadata={
+            "source": "cosmoprimo",
+            "engine": getattr(engine, "name", engine.__class__.__name__),
+            "field": "cb",
+            "k_units": "1/Mpc",
+            "pk_units": "Mpc^3",
+            "linear_pk_source": "fourier_delta_cb",
+        },
+    )
+
+
 def build_classpt_parity_linear_input_from_classy(cosmo: Any, z: float, k: np.ndarray) -> LinearPowerInput:
     """Build a parity-only linear input using the CLASS-PT internal tree basis term."""
     k = np.asarray(k, dtype=float)

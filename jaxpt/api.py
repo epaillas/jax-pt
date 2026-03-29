@@ -162,7 +162,7 @@ def predict_galaxy_multipoles(
     else:
         raise TypeError(
             "predict_galaxy_multipoles only accepts GalaxyPowerSpectrumMultipolesTheory, BasisSpectra, or LinearPowerInput. "
-            "Use build_linear_input_from_classy(...) before calling it."
+            "Build a LinearPowerInput or PowerSpectrumTemplate before calling it."
         )
 
     return galaxy_multipoles(basis, params, return_components=return_components)

@@ -1,12 +1,14 @@
 import numpy as np
 import pytest
 from classy import Class
+from cosmoprimo import Cosmology
 
 from jaxpt import (
     EFTBiasParams,
     LinearPowerInput,
     PTSettings,
     build_linear_input_from_classy,
+    build_linear_input_from_cosmoprimo,
     build_native_realspace_predictor,
     compare_multipoles_to_classpt,
     compute_basis,
@@ -206,6 +208,50 @@ def test_predict_galaxy_multipoles_accepts_linear_input(benchmark_k: np.ndarray)
 
     assert prediction.p0.shape == benchmark_k.shape
     assert prediction.metadata["backend"] == "native"
+
+
+def test_cosmoprimo_class_linear_input_matches_classy_basis(benchmark_k: np.ndarray) -> None:
+    z = 0.5
+    linear_k = np.logspace(-5.0, 1.0, 256)
+    settings = PTSettings(ir_resummation=False)
+
+    classy_cosmo = Class()
+    classy_cosmo.set({**FIDUCIAL_COSMOLOGY, "z_pk": z, "output": "mPk"})
+    classy_cosmo.compute()
+
+    cosmoprimo_cosmo = Cosmology(
+        engine="class",
+        h=FIDUCIAL_COSMOLOGY["h"],
+        omega_b=FIDUCIAL_COSMOLOGY["omega_b"],
+        omega_cdm=FIDUCIAL_COSMOLOGY["omega_cdm"],
+        n_s=FIDUCIAL_COSMOLOGY["n_s"],
+        tau_reio=FIDUCIAL_COSMOLOGY["tau_reio"],
+        m_ncdm=FIDUCIAL_COSMOLOGY["m_ncdm"],
+        YHe=FIDUCIAL_COSMOLOGY["YHe"],
+        N_ur=FIDUCIAL_COSMOLOGY["N_ur"],
+        logA=np.log(1.0e10 * FIDUCIAL_COSMOLOGY["A_s"]),
+        z_pk=[z],
+        kmax_pk=10.0,
+    )
+
+    class_linear_input = build_linear_input_from_classy(classy_cosmo, z=z, k=linear_k)
+    cosmoprimo_linear_input = build_linear_input_from_cosmoprimo(cosmoprimo_cosmo, z=z, k=linear_k)
+
+    class_basis = compute_basis(class_linear_input, settings=settings, k=benchmark_k)
+    cosmoprimo_basis = compute_basis(cosmoprimo_linear_input, settings=settings, k=benchmark_k)
+
+    np.testing.assert_allclose(
+        np.asarray(cosmoprimo_basis.components["real_tree_matter"]),
+        np.asarray(class_basis.components["real_tree_matter"]),
+        rtol=1.0e-2,
+        atol=0.0,
+    )
+    np.testing.assert_allclose(
+        np.asarray(cosmoprimo_basis.components["real_loop_matter"]),
+        np.asarray(class_basis.components["real_loop_matter"]),
+        rtol=3.0e-2,
+        atol=0.0,
+    )
 
 
 def test_classpt_parity_linear_input_matches_internal_tree_basis(benchmark_k: np.ndarray) -> None:

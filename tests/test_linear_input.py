@@ -1,6 +1,7 @@
 import numpy as np
 import pytest
 from classy import Class
+from cosmoprimo import Cosmology
 from unittest.mock import patch
 
 from jaxpt import (
@@ -10,6 +11,7 @@ from jaxpt import (
     PTSettings,
     PowerSpectrumTemplate,
     build_linear_input_from_classy,
+    build_linear_input_from_cosmoprimo,
     compute_basis,
     galaxy_multipoles,
     predict_galaxy_multipoles,
@@ -55,6 +57,65 @@ def test_build_linear_input_from_classy() -> None:
     assert np.isfinite(linear_input.growth_rate)
     assert linear_input.metadata["linear_pk_source"] == "classpt_pk_lin"
     assert "classy_cosmo" not in linear_input.metadata
+
+
+def test_build_linear_input_from_cosmoprimo_matches_classy_builder() -> None:
+    z = 0.5
+    k = np.logspace(-3, -1, 8)
+
+    classy_cosmo = Class()
+    classy_cosmo.set(
+        {
+            "A_s": 2.089e-9,
+            "n_s": 0.9649,
+            "tau_reio": 0.052,
+            "omega_b": 0.02237,
+            "omega_cdm": 0.12,
+            "h": 0.6736,
+            "YHe": 0.2425,
+            "N_ur": 2.0328,
+            "N_ncdm": 1,
+            "m_ncdm": 0.06,
+            "z_pk": z,
+            "output": "mPk",
+        }
+    )
+    classy_cosmo.compute()
+
+    cosmoprimo_cosmo = Cosmology(
+        engine="class",
+        h=0.6736,
+        omega_b=0.02237,
+        omega_cdm=0.12,
+        n_s=0.9649,
+        tau_reio=0.052,
+        m_ncdm=0.06,
+        YHe=0.2425,
+        N_ur=2.0328,
+        logA=np.log(1.0e10 * 2.089e-9),
+        z_pk=[z],
+        kmax_pk=10.0,
+    )
+
+    expected = build_linear_input_from_classy(classy_cosmo, z=z, k=k)
+    linear_input = build_linear_input_from_cosmoprimo(cosmoprimo_cosmo, z=z, k=k)
+
+    np.testing.assert_allclose(linear_input.k, expected.k)
+    np.testing.assert_allclose(linear_input.pk_linear, expected.pk_linear, rtol=1.0e-2, atol=0.0)
+    np.testing.assert_allclose(linear_input.growth_factor, expected.growth_factor, rtol=5.0e-4, atol=0.0)
+    np.testing.assert_allclose(linear_input.growth_rate, expected.growth_rate, rtol=5.0e-4, atol=0.0)
+    assert linear_input.transfer_linear is not None
+    assert np.all(np.isfinite(linear_input.transfer_linear))
+    assert linear_input.metadata["source"] == "cosmoprimo"
+    assert linear_input.metadata["engine"] == "class"
+    assert linear_input.metadata["linear_pk_source"] == "fourier_delta_cb"
+
+
+def test_build_linear_input_from_cosmoprimo_requires_engine() -> None:
+    cosmo = Cosmology(h=0.6736, omega_b=0.02237, omega_cdm=0.12, n_s=0.9649, logA=3.044)
+
+    with pytest.raises(ValueError, match="attached engine"):
+        build_linear_input_from_cosmoprimo(cosmo, z=0.5, k=np.logspace(-3, -1, 8))
 
 
 def test_build_classpt_parity_linear_input_from_classy() -> None:
@@ -238,6 +299,34 @@ def test_power_spectrum_template_from_classy_matches_existing_builder() -> None:
 
     expected = build_linear_input_from_classy(cosmo, z=z, k=k)
     template = PowerSpectrumTemplate.from_classy(cosmo, z=z, k=k, settings=settings)
+
+    np.testing.assert_allclose(template.linear_input.k, expected.k)
+    np.testing.assert_allclose(template.linear_input.pk_linear, expected.pk_linear)
+    np.testing.assert_allclose(template.linear_input.transfer_linear, expected.transfer_linear)
+    assert template.settings is settings
+
+
+def test_power_spectrum_template_from_cosmoprimo_matches_builder() -> None:
+    z = 0.5
+    k = np.logspace(-3, -1, 8)
+    settings = PTSettings(ir_resummation=False)
+    cosmo = Cosmology(
+        engine="class",
+        h=0.6736,
+        omega_b=0.02237,
+        omega_cdm=0.12,
+        n_s=0.9649,
+        tau_reio=0.052,
+        m_ncdm=0.06,
+        YHe=0.2425,
+        N_ur=2.0328,
+        logA=np.log(1.0e10 * 2.089e-9),
+        z_pk=[z],
+        kmax_pk=10.0,
+    )
+
+    expected = build_linear_input_from_cosmoprimo(cosmo, z=z, k=k)
+    template = PowerSpectrumTemplate.from_cosmoprimo(cosmo, z=z, k=k, settings=settings)
 
     np.testing.assert_allclose(template.linear_input.k, expected.k)
     np.testing.assert_allclose(template.linear_input.pk_linear, expected.pk_linear)
@@ -455,7 +544,7 @@ def test_predict_galaxy_multipoles_rejects_cosmology_object_source() -> None:
     cosmo.compute()
 
     params = EFTBiasParams(b1=2.0, b2=0.0, bG2=0.0, bGamma3=0.0, cs0=0.0, cs2=0.0, cs4=0.0, Pshot=0.0, b4=0.0)
-    with pytest.raises(TypeError, match="build_linear_input_from_classy"):
+    with pytest.raises(TypeError, match="Build a LinearPowerInput or PowerSpectrumTemplate"):
         predict_galaxy_multipoles(cosmo, np.logspace(-3, -1, 8), z, params)
 
 

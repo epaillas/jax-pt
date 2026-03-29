@@ -8,7 +8,7 @@ import numpy as np
 
 from .bias import galaxy_multipoles
 from .config import EFTBiasParams, PTSettings
-from .cosmology import LinearPowerInput, build_linear_input_from_classy
+from .cosmology import LinearPowerInput, build_linear_input_from_classy, build_linear_input_from_cosmoprimo
 from .native import compute_basis
 from .reference.classpt import BasisSpectra, MultipolePrediction
 
@@ -66,6 +66,23 @@ class PowerSpectrumTemplate:
         metadata: Mapping[str, Any] | None = None,
     ) -> PowerSpectrumTemplate:
         linear_input = build_linear_input_from_classy(cosmo, z=z, k=np.asarray(k, dtype=float))
+        return cls.from_linear_input(
+            linear_input,
+            settings=settings,
+            metadata=metadata,
+        )
+
+    @classmethod
+    def from_cosmoprimo(
+        cls,
+        cosmo: Any,
+        *,
+        z: float,
+        k: np.ndarray,
+        settings: PTSettings | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> PowerSpectrumTemplate:
+        linear_input = build_linear_input_from_cosmoprimo(cosmo, z=z, k=np.asarray(k, dtype=float))
         return cls.from_linear_input(
             linear_input,
             settings=settings,
