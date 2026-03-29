@@ -5,6 +5,7 @@ from cosmoprimo import Cosmology
 from unittest.mock import patch
 
 from jaxpt import (
+    ClassPTGalaxyPowerSpectrumMultipolesTheory,
     EFTBiasParams,
     GalaxyPowerSpectrumMultipolesTheory,
     LinearPowerInput,
@@ -273,7 +274,7 @@ def test_power_spectrum_template_from_linear_input_preserves_state() -> None:
     assert template.metadata["name"] == "test-template"
 
 
-def test_power_spectrum_template_from_classy_matches_existing_builder() -> None:
+def test_power_spectrum_template_constructor_from_classy_matches_existing_builder() -> None:
     z = 0.5
     k = np.logspace(-3, -1, 8)
     settings = PTSettings(ir_resummation=False)
@@ -298,7 +299,7 @@ def test_power_spectrum_template_from_classy_matches_existing_builder() -> None:
     cosmo.compute()
 
     expected = build_linear_input_from_classy(cosmo, z=z, k=k)
-    template = PowerSpectrumTemplate.from_classy(cosmo, z=z, k=k, settings=settings)
+    template = PowerSpectrumTemplate(cosmo, z=z, k=k, settings=settings)
 
     np.testing.assert_allclose(template.linear_input.k, expected.k)
     np.testing.assert_allclose(template.linear_input.pk_linear, expected.pk_linear)
@@ -306,7 +307,7 @@ def test_power_spectrum_template_from_classy_matches_existing_builder() -> None:
     assert template.settings is settings
 
 
-def test_power_spectrum_template_from_cosmoprimo_matches_builder() -> None:
+def test_power_spectrum_template_constructor_from_cosmoprimo_matches_builder() -> None:
     z = 0.5
     k = np.logspace(-3, -1, 8)
     settings = PTSettings(ir_resummation=False)
@@ -326,12 +327,103 @@ def test_power_spectrum_template_from_cosmoprimo_matches_builder() -> None:
     )
 
     expected = build_linear_input_from_cosmoprimo(cosmo, z=z, k=k)
-    template = PowerSpectrumTemplate.from_cosmoprimo(cosmo, z=z, k=k, settings=settings)
+    template = PowerSpectrumTemplate(cosmo, z=z, k=k, settings=settings)
 
     np.testing.assert_allclose(template.linear_input.k, expected.k)
     np.testing.assert_allclose(template.linear_input.pk_linear, expected.pk_linear)
     np.testing.assert_allclose(template.linear_input.transfer_linear, expected.transfer_linear)
     assert template.settings is settings
+
+
+def test_power_spectrum_template_constructor_uses_default_support_grid_for_cosmology() -> None:
+    z = 0.5
+    settings = PTSettings(ir_resummation=False, integration_nk=64)
+
+    cosmo = Class()
+    cosmo.set(
+        {
+            "A_s": 2.089e-9,
+            "n_s": 0.9649,
+            "tau_reio": 0.052,
+            "omega_b": 0.02237,
+            "omega_cdm": 0.12,
+            "h": 0.6736,
+            "YHe": 0.2425,
+            "N_ur": 2.0328,
+            "N_ncdm": 1,
+            "m_ncdm": 0.06,
+            "z_pk": z,
+            "output": "mPk",
+        }
+    )
+    cosmo.compute()
+
+    template = PowerSpectrumTemplate(cosmo, z=z, settings=settings)
+
+    assert template.linear_input.k.shape == (64,)
+    np.testing.assert_allclose(template.linear_input.k[[0, -1]], np.array([1.0e-5, 1.0e1]))
+
+
+def test_power_spectrum_template_constructor_supports_classpt_native_grid_parity_recipe() -> None:
+    z = 0.5
+    settings = PTSettings(ir_resummation=False)
+
+    cosmo = Class()
+    cosmo.set(
+        {
+            "A_s": 2.089e-9,
+            "n_s": 0.9649,
+            "tau_reio": 0.052,
+            "omega_b": 0.02237,
+            "omega_cdm": 0.12,
+            "h": 0.6736,
+            "YHe": 0.2425,
+            "N_ur": 2.0328,
+            "N_ncdm": 1,
+            "m_ncdm": 0.06,
+            "z_pk": z,
+            "output": "mTk,mPk",
+            "non linear": "PT",
+            "IR resummation": "No",
+            "Bias tracers": "Yes",
+            "cb": "Yes",
+            "RSD": "Yes",
+        }
+    )
+    cosmo.compute()
+
+    expected = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
+    template = PowerSpectrumTemplate(cosmo, z=z, settings=settings, input_recipe="classpt_native_grid_parity")
+
+    np.testing.assert_allclose(template.linear_input.k, expected.k)
+    np.testing.assert_allclose(template.linear_input.pk_linear, expected.pk_linear)
+    assert template.linear_input.metadata["support_grid"] == "native_fftlog_kdisc"
+
+
+def test_power_spectrum_template_rejects_missing_z_for_cosmology_source() -> None:
+    cosmo = Cosmology(engine="class", h=0.6736, omega_b=0.02237, omega_cdm=0.12, n_s=0.9649, logA=3.044, z_pk=[0.5], kmax_pk=10.0)
+
+    with pytest.raises(ValueError, match="requires z"):
+        PowerSpectrumTemplate(cosmo)
+
+
+def test_power_spectrum_template_rejects_unsupported_source() -> None:
+    with pytest.raises(TypeError, match="supported cosmology object"):
+        PowerSpectrumTemplate(object(), z=0.5)
+
+
+def test_power_spectrum_template_rejects_inconsistent_linear_input_z() -> None:
+    linear_input = LinearPowerInput(
+        k=np.logspace(-3, -1, 8),
+        pk_linear=np.linspace(100.0, 200.0, 8),
+        z=0.5,
+        growth_factor=0.75,
+        growth_rate=0.8,
+        h=0.7,
+    )
+
+    with pytest.raises(ValueError, match="must match LinearPowerInput.z"):
+        PowerSpectrumTemplate(linear_input, z=1.0)
 
 
 def test_galaxy_power_spectrum_multipoles_theory_matches_functional_path() -> None:
@@ -567,3 +659,40 @@ def test_predict_galaxy_multipoles_accepts_theory_source() -> None:
 
     assert prediction.p0.shape == theory.k.shape
     assert prediction.metadata["theory"] == "GalaxyPowerSpectrumMultipolesTheory"
+
+
+def test_classpt_reference_theory_uses_template_without_backend_flag() -> None:
+    z = 0.5
+    k = np.logspace(-3, -1, 8)
+    params = EFTBiasParams(b1=2.0, b2=0.0, bG2=0.0, bGamma3=0.0, cs0=0.0, cs2=0.0, cs4=0.0, Pshot=0.0, b4=0.0)
+
+    cosmo = Class()
+    cosmo.set(
+        {
+            "A_s": 2.089e-9,
+            "n_s": 0.9649,
+            "tau_reio": 0.052,
+            "omega_b": 0.02237,
+            "omega_cdm": 0.12,
+            "h": 0.6736,
+            "YHe": 0.2425,
+            "N_ur": 2.0328,
+            "N_ncdm": 1,
+            "m_ncdm": 0.06,
+            "z_pk": z,
+            "output": "mTk,mPk",
+            "non linear": "PT",
+            "IR resummation": "No",
+            "Bias tracers": "Yes",
+            "cb": "Yes",
+            "RSD": "Yes",
+        }
+    )
+    cosmo.compute()
+
+    theory = ClassPTGalaxyPowerSpectrumMultipolesTheory(template=PowerSpectrumTemplate(cosmo, z=z), k=k)
+    prediction = theory(params)
+
+    assert prediction.k.shape == k.shape
+    assert prediction.metadata["backend"] == "classpt"
+    assert prediction.metadata["theory"] == "ClassPTGalaxyPowerSpectrumMultipolesTheory"

@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
+from jaxpt import ClassPTGalaxyPowerSpectrumMultipolesTheory, EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -94,16 +94,15 @@ def main() -> None:
         kmax_pk=10.0,
     )
 
-    native_settings = PTSettings(ir_resummation=False, backend="native")
-    template = PowerSpectrumTemplate.from_cosmoprimo(cosmoprimo_cosmo, z=z, k=np.logspace(-5.0, 1.0, 256), settings=native_settings)
+    native_settings = PTSettings(ir_resummation=False)
+    template = PowerSpectrumTemplate(cosmoprimo_cosmo, z=z, settings=native_settings)
     native = GalaxyPowerSpectrumMultipolesTheory(template=template, k=EVAL_K)(params)
 
     classpt_cosmo = Class()
     classpt_cosmo.set({**FIDUCIAL_COSMOLOGY, **PT_OPTIONS_NOIR, "z_pk": z})
     classpt_cosmo.compute()
-    classpt_settings = PTSettings(ir_resummation=False, backend="classpt")
-    classpt_template = PowerSpectrumTemplate.from_classy(classpt_cosmo, z=z, k=np.logspace(-5.0, 1.0, 256), settings=classpt_settings)
-    classpt = GalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=EVAL_K)(params)
+    classpt_template = PowerSpectrumTemplate(classpt_cosmo, z=z, settings=PTSettings(ir_resummation=False))
+    classpt = ClassPTGalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=EVAL_K)(params)
 
     spectra = [
         ("P0", np.asarray(native.p0), np.asarray(classpt.p0)),

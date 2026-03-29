@@ -4,6 +4,7 @@ from classy import Class
 from cosmoprimo import Cosmology
 
 from jaxpt import (
+    ClassPTGalaxyPowerSpectrumMultipolesTheory,
     EFTBiasParams,
     GalaxyPowerSpectrumMultipolesTheory,
     LinearPowerInput,
@@ -246,7 +247,7 @@ def test_classpt_backend_requires_live_classy_cosmology(benchmark_k: np.ndarray)
     template = PowerSpectrumTemplate.from_linear_input(linear_input, settings=PTSettings(backend="classpt", ir_resummation=False))
 
     with pytest.raises(ValueError, match="requires a template built from a live classy.Class cosmology"):
-        GalaxyPowerSpectrumMultipolesTheory(template=template, k=benchmark_k)
+        ClassPTGalaxyPowerSpectrumMultipolesTheory(template=template, k=benchmark_k)
 
 
 def test_native_and_classpt_theory_share_high_level_api(benchmark_k: np.ndarray) -> None:
@@ -257,25 +258,19 @@ def test_native_and_classpt_theory_share_high_level_api(benchmark_k: np.ndarray)
     cosmo.set({**FIDUCIAL_COSMOLOGY, **DEFAULT_PT_OPTIONS_NOIR, "output": "mTk,mPk", "z_pk": z})
     cosmo.compute()
 
-    native_settings = PTSettings(ir_resummation=False, backend="native")
-    native_input = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=native_settings)
-    native_template = PowerSpectrumTemplate.from_linear_input(native_input, settings=native_settings)
+    native_settings = PTSettings(ir_resummation=False)
+    native_template = PowerSpectrumTemplate(cosmo, z=z, settings=native_settings, input_recipe="classpt_native_grid_parity")
     native_prediction = GalaxyPowerSpectrumMultipolesTheory(template=native_template, k=benchmark_k)(params)
 
-    classpt_template = PowerSpectrumTemplate.from_classy(
-        cosmo,
-        z=z,
-        k=np.logspace(-5.0, 1.0, 256),
-        settings=PTSettings(ir_resummation=False, backend="classpt"),
-    )
-    classpt_prediction = GalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=benchmark_k)(params)
+    classpt_template = PowerSpectrumTemplate(cosmo, z=z, settings=PTSettings(ir_resummation=False))
+    classpt_prediction = ClassPTGalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=benchmark_k)(params)
 
     assert native_prediction.k.shape == benchmark_k.shape
     assert classpt_prediction.k.shape == benchmark_k.shape
-    assert native_prediction.metadata["theory"] == classpt_prediction.metadata["theory"]
     assert native_prediction.metadata["template"] == classpt_prediction.metadata["template"]
     assert native_prediction.metadata["backend"] == "native"
     assert classpt_prediction.metadata["backend"] == "classpt"
+    assert classpt_prediction.metadata["theory"] == "ClassPTGalaxyPowerSpectrumMultipolesTheory"
 
 
 def test_cosmoprimo_class_linear_input_matches_classy_basis(benchmark_k: np.ndarray) -> None:

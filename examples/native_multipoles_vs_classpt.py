@@ -12,8 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
-from jaxpt.cosmology import build_classpt_native_grid_parity_linear_input_from_classy
+from jaxpt import ClassPTGalaxyPowerSpectrumMultipolesTheory, EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -85,14 +84,12 @@ def main() -> None:
 
     # Use the CLASS-PT internal tree-basis spectrum here so this example targets
     # backend parity rather than the default native `pk_lin` input convention.
-    native_settings = PTSettings(ir_resummation=False, backend="native")
-    linear_input = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=native_settings)
-    native_template = PowerSpectrumTemplate.from_linear_input(linear_input, settings=native_settings)
+    native_settings = PTSettings(ir_resummation=False)
+    native_template = PowerSpectrumTemplate(cosmo, z=z, settings=native_settings, input_recipe="classpt_native_grid_parity")
     native = GalaxyPowerSpectrumMultipolesTheory(template=native_template, k=EVAL_K)(params)
 
-    classpt_settings = PTSettings(ir_resummation=False, backend="classpt")
-    classpt_template = PowerSpectrumTemplate.from_classy(cosmo, z=z, k=np.logspace(-5.0, 1.0, 256), settings=classpt_settings)
-    classpt = GalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=EVAL_K)(params)
+    classpt_template = PowerSpectrumTemplate(cosmo, z=z, settings=PTSettings(ir_resummation=False))
+    classpt = ClassPTGalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=EVAL_K)(params)
 
     spectra = [
         ("P0", np.asarray(native.p0), np.asarray(classpt.p0)),

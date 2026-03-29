@@ -138,7 +138,7 @@ def predict_with_theory_api(
     # template once, feed it into a theory object, and evaluate that theory for
     # each nuisance-parameter sample.
     cosmo = build_classy(cosmology, z=z)
-    template = PowerSpectrumTemplate.from_classy(cosmo, z=z, k=support_k, settings=settings)
+    template = PowerSpectrumTemplate(cosmo, z=z, k=support_k, settings=settings)
     theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
     prediction = theory(nuisance)
     return prediction, template, theory

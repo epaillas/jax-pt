@@ -7,10 +7,11 @@ from .config import EFTBiasParams, PTSettings
 from .cosmology import LinearPowerInput, build_linear_input_from_classy, build_linear_input_from_cosmoprimo
 from .reference.classpt import BasisSpectra, MultipolePrediction
 from .reference.parity import compare_multipoles_to_classpt, compare_predictions
-from .theory import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
+from .theory import ClassPTGalaxyPowerSpectrumMultipolesTheory, GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
 
 __all__ = [
     "BasisSpectra",
+    "ClassPTGalaxyPowerSpectrumMultipolesTheory",
     "EFTBiasParams",
     "GalaxyPowerSpectrumMultipolesTheory",
     "LinearPowerInput",

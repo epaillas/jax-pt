@@ -12,7 +12,7 @@ from .cosmology import LinearPowerInput
 from .kernels.spectral import _loglog_interpolate_jax, compute_native_realspace_terms_from_arrays
 from .native import compute_basis as _compute_basis
 from .reference.classpt import BasisSpectra
-from .theory import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
+from .theory import ClassPTGalaxyPowerSpectrumMultipolesTheory, GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
 
 
 def compute_basis(linear_input: LinearPowerInput, settings: PTSettings | None = None, k: np.ndarray | None = None) -> BasisSpectra:
@@ -135,7 +135,7 @@ def predict_galaxy_multipoles(
     settings: PTSettings | None = None,
     return_components: bool = False,
 ):
-    if isinstance(source, GalaxyPowerSpectrumMultipolesTheory):
+    if isinstance(source, (GalaxyPowerSpectrumMultipolesTheory, ClassPTGalaxyPowerSpectrumMultipolesTheory)):
         if params is None:
             if not args:
                 raise TypeError("predict_galaxy_multipoles requires params when called with a GalaxyPowerSpectrumMultipolesTheory source.")
@@ -153,11 +153,8 @@ def predict_galaxy_multipoles(
             if not args:
                 raise TypeError("predict_galaxy_multipoles requires params when called with a LinearPowerInput source.")
             params = args[0]
-        theory = GalaxyPowerSpectrumMultipolesTheory(
-            template=PowerSpectrumTemplate.from_linear_input(source, settings=settings),
-            k=np.asarray(source.k, dtype=float),
-            return_components=return_components,
-        )
+        theory_cls = ClassPTGalaxyPowerSpectrumMultipolesTheory if settings is not None and settings.backend == "classpt" else GalaxyPowerSpectrumMultipolesTheory
+        theory = theory_cls(template=PowerSpectrumTemplate(source, settings=settings), k=np.asarray(source.k, dtype=float), return_components=return_components)
         return theory(params, return_components=return_components)
     else:
         raise TypeError(
