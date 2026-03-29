@@ -621,7 +621,7 @@ def test_queryable_template_reuses_basis_for_nuisance_only_updates(monkeypatch) 
         calls.append(float(linear_input.pk_linear[0]))
         return original_compute_basis(linear_input, settings=settings, k=k)
 
-    monkeypatch.setattr("jaxpt.theory.compute_basis", wrapped_compute_basis)
+    monkeypatch.setattr("jaxpt.theories.power_spectrum.compute_basis", wrapped_compute_basis)
 
     base_params = dict(b1=2.0, b2=-1.0, bG2=0.1, bGamma3=-0.1, cs0=0.0, cs2=30.0, cs4=0.0, Pshot=3000.0, b4=10.0)
     theory(omega_cdm=0.12, **base_params)

@@ -2,13 +2,15 @@
 
 This page documents the current execution flow for `jaxpt` power-spectrum prediction calls.
 
-The main entrypoint is `predict_galaxy_multipoles(...)`. It dispatches to either a precomputed
-`BasisSpectra` or the native `LinearPowerInput -> BasisSpectra` path, and then runs the shared
-multipole assembly function.
+The canonical entrypoint is now the theory layer in `jaxpt.theories`, typically
+`GalaxyPowerSpectrumMultipolesTheory(...)` or
+`ClassPTGalaxyPowerSpectrumMultipolesTheory(...)`. The
+`predict_galaxy_multipoles(...)` helper remains as a power-spectrum convenience
+function, but it is no longer the primary interface.
 
 ```mermaid
 flowchart TD
-    A["predict_galaxy_multipoles(source, ...)"] --> B{"source type"}
+    A["GalaxyPowerSpectrumMultipolesTheory(...) or predict_galaxy_multipoles(source, ...)"] --> B{"source type"}
 
     B -->|"BasisSpectra"| C["galaxy_multipoles(basis, params)"]
     B -->|"LinearPowerInput"| D["compute_basis(linear_input, settings, k?)"]

@@ -2,6 +2,10 @@
 
 `jaxpt` is a JAX implementation of perturbation-theory building blocks for galaxy-clustering predictions, with direct validation against [CLASS-PT](https://github.com/Michalychforever/CLASS-PT).
 
+The package is organized around observable-specific theory interfaces under
+`jaxpt.theories`. Power-spectrum theory classes live there today, with
+`emulators` and `inference` reserved for future emulator and sampling tooling.
+
 ## Installation
 
 ```bash
