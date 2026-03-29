@@ -134,13 +134,24 @@ def predict_galaxy_multipoles(
     params: EFTBiasParams | None = None,
     settings: PTSettings | None = None,
     return_components: bool = False,
+    **kwargs,
 ):
     if isinstance(source, (GalaxyPowerSpectrumMultipolesTheory, ClassPTGalaxyPowerSpectrumMultipolesTheory)):
         if params is None:
-            if not args:
-                raise TypeError("predict_galaxy_multipoles requires params when called with a GalaxyPowerSpectrumMultipolesTheory source.")
-            params = args[0]
-        return source(params, return_components=return_components)
+            params = args[0] if args else None
+        return source(params, return_components=return_components, **kwargs)
+
+    if isinstance(source, PowerSpectrumTemplate):
+        if params is None:
+            params = args[0] if args else None
+        theory_cls = (
+            ClassPTGalaxyPowerSpectrumMultipolesTheory
+            if source.settings.backend == "classpt"
+            else GalaxyPowerSpectrumMultipolesTheory
+        )
+        eval_k = np.asarray(source.linear_input.k if source.k is None else source.k, dtype=float)
+        theory = theory_cls(template=source, k=eval_k, return_components=return_components)
+        return theory(params, return_components=return_components, **kwargs)
 
     if isinstance(source, BasisSpectra):
         if params is None:
@@ -158,7 +169,7 @@ def predict_galaxy_multipoles(
         return theory(params, return_components=return_components)
     else:
         raise TypeError(
-            "predict_galaxy_multipoles only accepts GalaxyPowerSpectrumMultipolesTheory, BasisSpectra, or LinearPowerInput. "
+            "predict_galaxy_multipoles only accepts GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate, BasisSpectra, or LinearPowerInput. "
             "Build a LinearPowerInput or PowerSpectrumTemplate before calling it."
         )
 

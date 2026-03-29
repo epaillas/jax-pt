@@ -18,6 +18,8 @@ from jaxpt import (
     predict_galaxy_multipoles,
 )
 from jaxpt.cosmology import (
+    BaseCosmologyProvider,
+    ResolvedCosmologyState,
     build_classpt_native_grid_parity_linear_input_from_classy,
     build_classpt_parity_linear_input_from_classy,
     prepare_native_fftlog_input,
@@ -497,6 +499,136 @@ def test_galaxy_power_spectrum_multipoles_theory_rejects_invalid_mapping() -> No
                 "extra": 1.0,
             }
         )
+
+
+def test_fixed_linear_input_template_rejects_cosmology_overrides() -> None:
+    linear_input = LinearPowerInput(
+        k=np.logspace(-3, -1, 8),
+        pk_linear=np.linspace(100.0, 200.0, 8),
+        z=0.5,
+        growth_factor=0.75,
+        growth_rate=0.8,
+        h=0.7,
+    )
+    theory = GalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(linear_input, settings=PTSettings(ir_resummation=False)),
+        k=np.linspace(0.01, 0.08, 6),
+    )
+
+    with pytest.raises(ValueError, match="cannot accept cosmology overrides"):
+        theory(
+            b1=2.0,
+            b2=-1.0,
+            bG2=0.1,
+            bGamma3=-0.1,
+            cs0=0.0,
+            cs2=30.0,
+            cs4=0.0,
+            Pshot=3000.0,
+            b4=10.0,
+            omega_cdm=0.13,
+        )
+
+
+def test_queryable_template_accepts_flat_nuisance_and_cosmology_kwargs() -> None:
+    class FakeProvider(BaseCosmologyProvider):
+        def __init__(self) -> None:
+            super().__init__({"omega_cdm": 0.12})
+
+        def build_cosmology(self, cosmology_params):
+            raise NotImplementedError
+
+        def build_linear_input(self, *, cosmology, z, k, settings, input_recipe):
+            raise NotImplementedError
+
+        def resolve(self, *, overrides, z, k, settings, input_recipe):
+            omega_cdm = float(overrides.get("omega_cdm", self.fiducial_params["omega_cdm"]))
+            support_k = np.logspace(-3, -1, 16) if k is None else np.asarray(k, dtype=float)
+            linear_input = LinearPowerInput(
+                k=support_k,
+                pk_linear=(omega_cdm / 0.12) * np.linspace(100.0, 200.0, support_k.size),
+                z=float(z),
+                growth_factor=0.75,
+                growth_rate=0.8,
+                h=0.7,
+            )
+            cosmology_params = {"omega_cdm": omega_cdm}
+            return ResolvedCosmologyState(
+                cosmology={"omega_cdm": omega_cdm},
+                linear_input=linear_input,
+                cosmology_params=cosmology_params,
+                query_key=(("omega_cdm", omega_cdm),),
+            )
+
+    template = PowerSpectrumTemplate({"omega_cdm": 0.12}, z=0.5, k=np.logspace(-3, -1, 16), settings=PTSettings(loop_order="tree", ir_resummation=False))
+    template._cosmology_provider = FakeProvider()
+    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=np.linspace(0.01, 0.08, 9))
+
+    prediction = theory(
+        omega_cdm=0.13,
+        b1=2.0,
+        b2=-1.0,
+        bG2=0.1,
+        bGamma3=-0.1,
+        cs0=0.0,
+        cs2=30.0,
+        cs4=0.0,
+        Pshot=3000.0,
+        b4=10.0,
+    )
+
+    assert prediction.p0.shape == theory.k.shape
+    assert prediction.metadata["theory"] == "GalaxyPowerSpectrumMultipolesTheory"
+
+
+def test_queryable_template_reuses_basis_for_nuisance_only_updates(monkeypatch) -> None:
+    class FakeProvider(BaseCosmologyProvider):
+        def __init__(self) -> None:
+            super().__init__({"omega_cdm": 0.12})
+
+        def build_cosmology(self, cosmology_params):
+            raise NotImplementedError
+
+        def build_linear_input(self, *, cosmology, z, k, settings, input_recipe):
+            raise NotImplementedError
+
+        def resolve(self, *, overrides, z, k, settings, input_recipe):
+            omega_cdm = float(overrides.get("omega_cdm", self.fiducial_params["omega_cdm"]))
+            support_k = np.logspace(-3, -1, 16)
+            linear_input = LinearPowerInput(
+                k=support_k,
+                pk_linear=(omega_cdm / 0.12) * np.linspace(100.0, 200.0, support_k.size),
+                z=float(z),
+                growth_factor=0.75,
+                growth_rate=0.8,
+                h=0.7,
+            )
+            return ResolvedCosmologyState(
+                cosmology={"omega_cdm": omega_cdm},
+                linear_input=linear_input,
+                cosmology_params={"omega_cdm": omega_cdm},
+                query_key=(("omega_cdm", omega_cdm),),
+            )
+
+    template = PowerSpectrumTemplate({"omega_cdm": 0.12}, z=0.5, settings=PTSettings(loop_order="tree", ir_resummation=False))
+    template._cosmology_provider = FakeProvider()
+    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=np.linspace(0.01, 0.08, 9))
+
+    original_compute_basis = compute_basis
+    calls = []
+
+    def wrapped_compute_basis(linear_input, settings, k=None):
+        calls.append(float(linear_input.pk_linear[0]))
+        return original_compute_basis(linear_input, settings=settings, k=k)
+
+    monkeypatch.setattr("jaxpt.theory.compute_basis", wrapped_compute_basis)
+
+    base_params = dict(b1=2.0, b2=-1.0, bG2=0.1, bGamma3=-0.1, cs0=0.0, cs2=30.0, cs4=0.0, Pshot=3000.0, b4=10.0)
+    theory(omega_cdm=0.12, **base_params)
+    theory(omega_cdm=0.12, **{**base_params, "b1": 2.2})
+    theory(omega_cdm=0.13, **base_params)
+
+    assert calls == [100.0, 100.0 * 0.13 / 0.12]
 
 
 def test_native_tree_loop_order_matches_kaiser_prediction() -> None:

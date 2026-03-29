@@ -343,3 +343,272 @@ def prepare_native_fftlog_input(
         h=linear_input.h,
         metadata=metadata,
     )
+
+
+_CLASSY_FIXED_PARAM_NAMES = frozenset(
+    {
+        "z_pk",
+        "output",
+        "non linear",
+        "IR resummation",
+        "Bias tracers",
+        "cb",
+        "RSD",
+    }
+)
+_COSMOPRIMO_FIXED_PARAM_NAMES = frozenset({"z_pk", "kmax_pk", "ellmax_cl", "non_linear", "modes", "lensing"})
+_COSMOLOGY_ALIAS_GROUPS = (
+    ("A_s", "logA", "ln10^10A_s"),
+    ("h", "H0"),
+)
+
+
+def _freeze_cache_value(value: Any) -> Any:
+    array = np.asarray(value)
+    if array.ndim == 0:
+        return float(array)
+    return tuple(float(item) for item in array.reshape(-1))
+
+
+def _cache_key_from_params(params: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
+    return tuple((name, _freeze_cache_value(value)) for name, value in sorted(params.items()))
+
+
+def _split_fixed_and_query_params(
+    params: dict[str, Any],
+    *,
+    fixed_names: set[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    fixed, query = {}, {}
+    for name, value in params.items():
+        if name in fixed_names:
+            fixed[name] = value
+        else:
+            query[name] = value
+    return fixed, query
+
+
+def _normalize_cosmology_overrides(overrides: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(overrides)
+    for canonical, *aliases in _COSMOLOGY_ALIAS_GROUPS:
+        values = [(name, normalized[name]) for name in (canonical, *aliases) if name in normalized]
+        if len(values) > 1:
+            first_value = values[0][1]
+            for name, value in values[1:]:
+                if not np.allclose(np.asarray(value), np.asarray(first_value), rtol=0.0, atol=0.0):
+                    names = ", ".join(name for name, _ in values)
+                    raise ValueError(f"Conflicting cosmology aliases provided for {canonical}: {names}.")
+        if not values:
+            continue
+        _, value = values[-1]
+        for name, _ in values:
+            del normalized[name]
+        if canonical == "A_s":
+            if any(name in overrides for name in ("logA", "ln10^10A_s")):
+                value = np.exp(float(value)) / 1.0e10
+        elif canonical == "h":
+            if "H0" in overrides:
+                value = float(value) / 100.0
+        normalized[canonical] = value
+    return normalized
+
+
+def _extract_classy_fiducial_params(cosmo: Any) -> dict[str, Any]:
+    return dict(getattr(cosmo, "pars", {}))
+
+
+def _extract_cosmoprimo_fiducial_params(cosmo: Any) -> dict[str, Any]:
+    params = {
+        "h": float(cosmo["h"]),
+        "n_s": float(cosmo["n_s"]),
+        "A_s": float(cosmo["A_s"]),
+    }
+    for name in ["omega_b", "omega_cdm", "tau_reio", "YHe", "N_ur", "Omega_k", "w0_fld", "wa_fld"]:
+        try:
+            value = cosmo[name]
+        except Exception:
+            continue
+        params[name] = np.asarray(value).item() if np.asarray(value).ndim == 0 else np.asarray(value)
+    try:
+        value = cosmo["m_ncdm"]
+    except Exception:
+        value = None
+    if value is not None:
+        array = np.asarray(value)
+        params["m_ncdm"] = array.item() if array.ndim == 0 or array.size == 1 else array
+    engine_name = getattr(getattr(cosmo, "engine", None), "name", None)
+    full_params = dict(cosmo.get_params())
+    for name in _COSMOPRIMO_FIXED_PARAM_NAMES:
+        if name in full_params:
+            params[name] = full_params[name]
+    if engine_name is not None:
+        params["engine"] = engine_name
+    return params
+
+
+def _default_classy_engine_settings(
+    *,
+    z: float,
+    settings: PTSettings,
+    input_recipe: str | None,
+) -> dict[str, Any]:
+    recipe = "linear_pk" if input_recipe is None else input_recipe
+    params: dict[str, Any] = {"z_pk": float(z)}
+    if recipe == "linear_pk":
+        params["output"] = "mPk"
+        return params
+    if recipe in {"classpt_parity", "classpt_native_grid_parity"}:
+        params.update(
+            {
+                "output": "mTk,mPk",
+                "non linear": "PT",
+                "IR resummation": "Yes" if settings.ir_resummation else "No",
+                "Bias tracers": "Yes",
+                "cb": "Yes" if settings.cb else "No",
+                "RSD": "Yes" if settings.rsd else "No",
+            }
+        )
+        return params
+    raise ValueError(
+        "Unsupported CLASS query recipe. Expected one of {'linear_pk', 'classpt_parity', 'classpt_native_grid_parity'}."
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCosmologyState:
+    cosmology: Any
+    linear_input: LinearPowerInput
+    cosmology_params: dict[str, Any]
+    query_key: tuple[tuple[str, Any], ...]
+
+
+class BaseCosmologyProvider:
+    name = "base"
+
+    def __init__(self, fiducial_params: dict[str, Any]) -> None:
+        self.fiducial_params = dict(fiducial_params)
+        self.query_param_names = set(self.fiducial_params)
+
+    def accepts_param(self, name: str) -> bool:
+        return name in self.query_param_names or any(name in aliases for aliases in _COSMOLOGY_ALIAS_GROUPS)
+
+    def resolve(self, *, overrides: dict[str, Any], z: float, k: np.ndarray | None, settings: PTSettings, input_recipe: str | None) -> ResolvedCosmologyState:
+        normalized = _normalize_cosmology_overrides(overrides)
+        invalid = sorted(name for name in normalized if name not in self.query_param_names)
+        if invalid:
+            raise ValueError(f"Unexpected cosmology parameters: {', '.join(invalid)}")
+        cosmology_params = dict(self.fiducial_params)
+        cosmology_params.update(normalized)
+        cosmology = self.build_cosmology(cosmology_params)
+        linear_input = self.build_linear_input(cosmology=cosmology, z=z, k=k, settings=settings, input_recipe=input_recipe)
+        return ResolvedCosmologyState(
+            cosmology=cosmology,
+            linear_input=linear_input,
+            cosmology_params=cosmology_params,
+            query_key=_cache_key_from_params(cosmology_params),
+        )
+
+    def build_cosmology(self, cosmology_params: dict[str, Any]) -> Any:
+        raise NotImplementedError
+
+    def build_linear_input(self, *, cosmology: Any, z: float, k: np.ndarray | None, settings: PTSettings, input_recipe: str | None) -> LinearPowerInput:
+        raise NotImplementedError
+
+
+class ClassyCosmologyProvider(BaseCosmologyProvider):
+    name = "classy"
+
+    def __init__(self, fiducial_params: dict[str, Any], *, fixed_params: dict[str, Any]) -> None:
+        super().__init__(fiducial_params)
+        self.fixed_params = dict(fixed_params)
+        self.query_param_names = set(fiducial_params)
+
+    @classmethod
+    def from_cosmology(cls, cosmo: Any) -> "ClassyCosmologyProvider":
+        params = _extract_classy_fiducial_params(cosmo)
+        fixed_params, fiducial_params = _split_fixed_and_query_params(params, fixed_names=set(_CLASSY_FIXED_PARAM_NAMES))
+        return cls(fiducial_params=fiducial_params, fixed_params=fixed_params)
+
+    @classmethod
+    def from_mapping(
+        cls,
+        params: dict[str, Any],
+        *,
+        z: float,
+        settings: PTSettings,
+        input_recipe: str | None,
+    ) -> "ClassyCosmologyProvider":
+        fixed_params = _default_classy_engine_settings(z=z, settings=settings, input_recipe=input_recipe)
+        query_params = dict(params)
+        for name in list(query_params):
+            if name in fixed_params:
+                fixed_params[name] = query_params.pop(name)
+        return cls(fiducial_params=query_params, fixed_params=fixed_params)
+
+    def build_cosmology(self, cosmology_params: dict[str, Any]) -> Any:
+        from classy import Class
+
+        cosmo = Class()
+        cosmo.set({**self.fixed_params, **cosmology_params})
+        cosmo.compute()
+        return cosmo
+
+    def build_linear_input(self, *, cosmology: Any, z: float, k: np.ndarray | None, settings: PTSettings, input_recipe: str | None) -> LinearPowerInput:
+        recipe = "linear_pk" if input_recipe is None else input_recipe
+        if recipe == "linear_pk":
+            support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)
+            return build_linear_input_from_classy(cosmology, z=float(z), k=support_k)
+        if recipe == "classpt_parity":
+            support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)
+            return build_classpt_parity_linear_input_from_classy(cosmology, z=float(z), k=support_k)
+        if recipe == "classpt_native_grid_parity":
+            if k is not None:
+                raise ValueError("CLASS native-grid parity recipes derive the support grid internally and do not accept k.")
+            return build_classpt_native_grid_parity_linear_input_from_classy(cosmology, z=float(z), settings=settings)
+        raise ValueError(
+            "Unsupported CLASS query recipe. Expected one of {'linear_pk', 'classpt_parity', 'classpt_native_grid_parity'}."
+        )
+
+
+class CosmoprimoCosmologyProvider(BaseCosmologyProvider):
+    name = "cosmoprimo"
+
+    def __init__(self, fiducial_params: dict[str, Any], *, fixed_params: dict[str, Any], base_cosmology: Any | None = None) -> None:
+        super().__init__(fiducial_params)
+        self.fixed_params = dict(fixed_params)
+        self.base_cosmology = base_cosmology
+        self.query_param_names = set(fiducial_params)
+
+    @classmethod
+    def from_cosmology(cls, cosmo: Any) -> "CosmoprimoCosmologyProvider":
+        params = _extract_cosmoprimo_fiducial_params(cosmo)
+        fixed_params = {name: params.pop(name) for name in list(params) if name in _COSMOPRIMO_FIXED_PARAM_NAMES or name == "engine"}
+        return cls(fiducial_params=params, fixed_params=fixed_params, base_cosmology=cosmo)
+
+    @classmethod
+    def from_mapping(cls, params: dict[str, Any], *, engine: str = "class") -> "CosmoprimoCosmologyProvider":
+        fixed_params = {"engine": engine}
+        query_params = dict(params)
+        for name in list(query_params):
+            if name in _COSMOPRIMO_FIXED_PARAM_NAMES:
+                fixed_params[name] = query_params.pop(name)
+        return cls(fiducial_params=query_params, fixed_params=fixed_params)
+
+    def build_cosmology(self, cosmology_params: dict[str, Any]) -> Any:
+        from cosmoprimo import Cosmology
+
+        params = {**self.fixed_params, **cosmology_params}
+        engine = params.pop("engine", "class")
+        if self.base_cosmology is not None:
+            return self.base_cosmology.clone(base="input", **cosmology_params)
+        return Cosmology(engine=engine, **params)
+
+    def build_linear_input(self, *, cosmology: Any, z: float, k: np.ndarray | None, settings: PTSettings, input_recipe: str | None) -> LinearPowerInput:
+        if input_recipe not in {None, "linear_pk"}:
+            raise ValueError("Cosmoprimo queryable templates only support input_recipe='linear_pk'.")
+        support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)
+        return build_linear_input_from_cosmoprimo(cosmology, z=float(z), k=support_k)
+
+
+def _default_support_k(settings: PTSettings) -> np.ndarray:
+    return np.logspace(-5.0, 1.0, int(settings.integration_nk))

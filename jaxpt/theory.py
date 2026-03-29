@@ -9,26 +9,66 @@ import numpy as np
 from .bias import galaxy_multipoles
 from .config import EFTBiasParams, PTSettings
 from .cosmology import (
+    BaseCosmologyProvider,
+    ClassyCosmologyProvider,
+    CosmoprimoCosmologyProvider,
     LinearPowerInput,
-    build_classpt_native_grid_parity_linear_input_from_classy,
-    build_classpt_parity_linear_input_from_classy,
-    build_linear_input_from_classy,
-    build_linear_input_from_cosmoprimo,
+    ResolvedCosmologyState,
 )
 from .native import compute_basis
 from .reference.classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
 
 
 _EFT_PARAM_NAMES = tuple(param.name for param in fields(EFTBiasParams))
+_COSMOLOGY_ALIAS_NAMES = {"A_s", "logA", "ln10^10A_s", "h", "H0"}
+_COMMON_COSMOLOGY_PARAM_NAMES = {
+    "A_s",
+    "logA",
+    "ln10^10A_s",
+    "h",
+    "H0",
+    "n_s",
+    "tau_reio",
+    "omega_b",
+    "omega_cdm",
+    "N_ur",
+    "N_ncdm",
+    "m_ncdm",
+    "YHe",
+    "Omega_k",
+    "w0_fld",
+    "wa_fld",
+}
 
 
-def _normalize_eft_params(parameters: EFTBiasParams | Mapping[str, float]) -> EFTBiasParams:
-    """Normalize mapping-style parameter inputs into `EFTBiasParams`."""
-    if isinstance(parameters, EFTBiasParams):
-        return parameters
-    if not isinstance(parameters, Mapping):
-        raise TypeError("Theory parameters must be provided as an EFTBiasParams instance or a mapping of parameter names to floats.")
+def _eft_params_as_dict(params: EFTBiasParams) -> dict[str, float]:
+    return {name: float(getattr(params, name)) for name in _EFT_PARAM_NAMES}
 
+
+def _normalize_flat_query(
+    parameters: EFTBiasParams | Mapping[str, float] | None,
+    kwargs: Mapping[str, float],
+) -> dict[str, float]:
+    if parameters is None:
+        base: dict[str, float] = {}
+    elif isinstance(parameters, EFTBiasParams):
+        base = _eft_params_as_dict(parameters)
+    elif isinstance(parameters, Mapping):
+        base = {str(name): float(value) for name, value in parameters.items()}
+    else:
+        raise TypeError(
+            "Theory parameters must be provided as an EFTBiasParams instance, a mapping, or flat keyword arguments."
+        )
+
+    overlap = sorted(set(base) & set(kwargs))
+    if overlap:
+        raise ValueError(f"Duplicate query parameters provided both positionally and by keyword: {', '.join(overlap)}.")
+    for name, value in kwargs.items():
+        base[str(name)] = float(value)
+    return base
+
+
+def _normalize_nuisance_params(parameters: Mapping[str, float]) -> EFTBiasParams:
     extra = sorted(set(parameters) - set(_EFT_PARAM_NAMES))
     missing = [name for name in _EFT_PARAM_NAMES if name not in parameters]
     if missing or extra:
@@ -38,73 +78,7 @@ def _normalize_eft_params(parameters: EFTBiasParams | Mapping[str, float]) -> EF
         if extra:
             parts.append(f"unexpected parameters: {', '.join(extra)}")
         raise ValueError("; ".join(parts))
-
     return EFTBiasParams(**{name: float(parameters[name]) for name in _EFT_PARAM_NAMES})
-
-
-def _default_support_k(settings: PTSettings) -> np.ndarray:
-    """Return the default support grid used when a template is built from a cosmology object."""
-    return np.logspace(-5.0, 1.0, int(settings.integration_nk))
-
-
-def _is_cosmoprimo_cosmology(source: Any) -> bool:
-    return hasattr(source, "get_fourier") and hasattr(source, "get_background")
-
-
-def _is_classy_cosmology(source: Any) -> bool:
-    return hasattr(source, "pk_lin") and hasattr(source, "h") and hasattr(source, "scale_independent_growth_factor_f")
-
-
-def _build_template_linear_input(
-    source: Any,
-    *,
-    z: float | None,
-    k: np.ndarray | None,
-    settings: PTSettings,
-    input_recipe: str | None,
-) -> LinearPowerInput:
-    """Build a normalized `LinearPowerInput` from either a linear input or a supported cosmology object."""
-    if isinstance(source, LinearPowerInput):
-        if z is not None and not np.isclose(float(z), float(source.z)):
-            raise ValueError("PowerSpectrumTemplate z must match LinearPowerInput.z when both are provided.")
-        if k is not None:
-            raise ValueError("PowerSpectrumTemplate.k is only supported when constructing from a cosmology object.")
-        if input_recipe is not None:
-            raise ValueError("PowerSpectrumTemplate.input_recipe is only supported when constructing from a cosmology object.")
-        return source
-
-    if z is None:
-        raise ValueError("PowerSpectrumTemplate requires z when constructed from a cosmology object.")
-
-    if _is_cosmoprimo_cosmology(source):
-        if input_recipe not in {None, "linear_pk"}:
-            raise ValueError("Cosmoprimo-backed PowerSpectrumTemplate only supports input_recipe='linear_pk'.")
-        support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)
-        return build_linear_input_from_cosmoprimo(source, z=float(z), k=support_k)
-
-    if _is_classy_cosmology(source):
-        recipe = "linear_pk" if input_recipe is None else input_recipe
-        if recipe == "linear_pk":
-            support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)
-            return build_linear_input_from_classy(source, z=float(z), k=support_k)
-        if recipe == "classpt_parity":
-            support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)
-            return build_classpt_parity_linear_input_from_classy(source, z=float(z), k=support_k)
-        if recipe == "classpt_native_grid_parity":
-            if k is not None:
-                raise ValueError(
-                    "PowerSpectrumTemplate with input_recipe='classpt_native_grid_parity' derives its support grid from settings and does not accept k."
-                )
-            return build_classpt_native_grid_parity_linear_input_from_classy(source, z=float(z), settings=settings)
-        raise ValueError(
-            "Unsupported PowerSpectrumTemplate input_recipe for classy cosmology. "
-            "Expected one of {'linear_pk', 'classpt_parity', 'classpt_native_grid_parity'}."
-        )
-
-    raise TypeError(
-        "PowerSpectrumTemplate only accepts LinearPowerInput or a supported cosmology object. "
-        "Supported cosmology sources are classy.Class-like and cosmoprimo.Cosmology-like objects."
-    )
 
 
 def _finalize_multipole_prediction(
@@ -125,72 +99,86 @@ def _finalize_multipole_prediction(
     )
 
 
-def _require_classpt_cosmo(template: "PowerSpectrumTemplate", theory_name: str):
-    cosmo = template.linear_input.metadata.get("_classpt_cosmo")
-    if cosmo is None:
-        raise ValueError(
-            f"{theory_name} requires a template built from a live classy.Class cosmology."
-        )
-    return cosmo
+def _is_cosmoprimo_cosmology(source: Any) -> bool:
+    return hasattr(source, "get_fourier") and hasattr(source, "get_background")
 
 
-@dataclass(frozen=True, slots=True, init=False)
+def _is_classy_cosmology(source: Any) -> bool:
+    return hasattr(source, "pk_lin") and hasattr(source, "h") and hasattr(source, "scale_independent_growth_factor_f")
+
+
+def _build_provider(
+    source: Any,
+    *,
+    z: float,
+    settings: PTSettings,
+    input_recipe: str | None,
+    provider: str | None,
+) -> BaseCosmologyProvider:
+    if provider is not None:
+        provider = provider.lower()
+
+    if _is_classy_cosmology(source):
+        return ClassyCosmologyProvider.from_cosmology(source)
+    if _is_cosmoprimo_cosmology(source):
+        return CosmoprimoCosmologyProvider.from_cosmology(source)
+    if isinstance(source, Mapping):
+        if provider is None:
+            provider = "classy"
+        if provider == "classy":
+            return ClassyCosmologyProvider.from_mapping(dict(source), z=float(z), settings=settings, input_recipe=input_recipe)
+        if provider == "cosmoprimo":
+            return CosmoprimoCosmologyProvider.from_mapping(dict(source))
+        raise ValueError("Unsupported PowerSpectrumTemplate provider. Expected one of {'classy', 'cosmoprimo'}.")
+    raise TypeError(
+        "PowerSpectrumTemplate only accepts LinearPowerInput, a supported cosmology object, or a fiducial cosmology mapping."
+    )
+
+
+@dataclass(slots=True)
 class PowerSpectrumTemplate:
-    """Normalized cosmology-side inputs for galaxy power-spectrum theory.
+    """Template holding fixed setup plus fiducial cosmology defaults.
 
-    The constructor accepts either an already-built `LinearPowerInput` or a
-    supported cosmology object. When a cosmology object is provided, the
-    template builds the internal linear input automatically using the matching
-    adapter.
-
-    Parameters
-    ----------
-    source
-        Either a `LinearPowerInput`, a `classy.Class`-like object, or a
-        `cosmoprimo.Cosmology`-like object.
-    z
-        Redshift used when constructing the template from a cosmology object.
-        Ignored unless validated against `LinearPowerInput.z` when `source` is
-        already normalized.
-    k
-        Optional support grid for cosmology-backed templates. If omitted, the
-        template uses a default log-spaced grid controlled by
-        `settings.integration_nk`.
-    settings
-        Numerical and physical settings shared with the theory object.
-    input_recipe
-        Optional expert override for `classy`-backed templates. Supported
-        values are `"linear_pk"`, `"classpt_parity"`, and
-        `"classpt_native_grid_parity"`.
-    metadata
-        Extra user metadata stored on the template.
+    Templates built from a cosmology object or a fiducial cosmology mapping are
+    query-aware: they can rebuild their cosmology-dependent state when the user
+    provides cosmology overrides at theory evaluation time. Templates built from
+    a `LinearPowerInput` are fixed-cosmology only.
     """
-    linear_input: LinearPowerInput
-    settings: PTSettings = field(default_factory=PTSettings)
-    metadata: dict[str, Any] = field(default_factory=dict)
 
-    def __init__(
-        self,
-        source: LinearPowerInput | Any,
-        *,
-        z: float | None = None,
-        k: np.ndarray | None = None,
-        settings: PTSettings | None = None,
-        input_recipe: str | None = None,
-        metadata: Mapping[str, Any] | None = None,
-    ) -> None:
-        """Construct a normalized template from linear inputs or cosmology objects."""
-        normalized_settings = PTSettings() if settings is None else settings
-        linear_input = _build_template_linear_input(
-            source,
-            z=z,
-            k=k,
-            settings=normalized_settings,
-            input_recipe=input_recipe,
+    source: Any
+    z: float | None = None
+    k: np.ndarray | None = None
+    settings: PTSettings = field(default_factory=PTSettings)
+    input_recipe: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    provider: str | None = None
+    _fixed_linear_input: LinearPowerInput | None = field(init=False, default=None, repr=False)
+    _cosmology_provider: BaseCosmologyProvider | None = field(init=False, default=None, repr=False)
+    _resolved_state: ResolvedCosmologyState | None = field(init=False, default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.k is not None:
+            self.k = np.asarray(self.k, dtype=float)
+        self.metadata = dict(self.metadata)
+        if isinstance(self.source, LinearPowerInput):
+            if self.z is not None and not np.isclose(float(self.z), float(self.source.z)):
+                raise ValueError("PowerSpectrumTemplate z must match LinearPowerInput.z when both are provided.")
+            if self.input_recipe is not None:
+                raise ValueError("PowerSpectrumTemplate.input_recipe is only supported for cosmology-backed templates.")
+            self._fixed_linear_input = self.source
+            self.z = float(self.source.z)
+            return
+
+        if self.z is None:
+            raise ValueError("PowerSpectrumTemplate requires z when constructed from a cosmology object or fiducial cosmology mapping.")
+        self.z = float(self.z)
+        self._cosmology_provider = _build_provider(
+            self.source,
+            z=self.z,
+            settings=self.settings,
+            input_recipe=self.input_recipe,
+            provider=self.provider,
         )
-        object.__setattr__(self, "linear_input", linear_input)
-        object.__setattr__(self, "settings", normalized_settings)
-        object.__setattr__(self, "metadata", {} if metadata is None else dict(metadata))
 
     @classmethod
     def from_linear_input(
@@ -200,102 +188,70 @@ class PowerSpectrumTemplate:
         settings: PTSettings | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> PowerSpectrumTemplate:
-        """Build a template explicitly from a precomputed `LinearPowerInput`."""
-        return cls(linear_input, settings=settings, metadata=metadata)
-
-    @classmethod
-    def from_classy(
-        cls,
-        cosmo: Any,
-        *,
-        z: float,
-        k: np.ndarray | None = None,
-        settings: PTSettings | None = None,
-        input_recipe: str | None = None,
-        metadata: Mapping[str, Any] | None = None,
-    ) -> PowerSpectrumTemplate:
-        """Build a template from a live `classy` cosmology object."""
-        return cls(cosmo, z=z, k=k, settings=settings, input_recipe=input_recipe, metadata=metadata)
-
-    @classmethod
-    def from_cosmoprimo(
-        cls,
-        cosmo: Any,
-        *,
-        z: float,
-        k: np.ndarray | None = None,
-        settings: PTSettings | None = None,
-        metadata: Mapping[str, Any] | None = None,
-    ) -> PowerSpectrumTemplate:
-        """Build a template from a `cosmoprimo` cosmology object."""
-        return cls(cosmo, z=z, k=k, settings=settings, metadata=metadata)
+        return cls(linear_input, settings=PTSettings() if settings is None else settings, metadata={} if metadata is None else dict(metadata))
 
     @property
-    def z(self) -> float:
-        return float(self.linear_input.z)
+    def linear_input(self) -> LinearPowerInput:
+        return self.resolve({}).linear_input
+
+    @property
+    def cosmology_param_names(self) -> set[str]:
+        if self._cosmology_provider is None:
+            return set()
+        return set(self._cosmology_provider.query_param_names)
+
+    @property
+    def is_queryable(self) -> bool:
+        return self._cosmology_provider is not None
+
+    def resolve(self, cosmology_overrides: Mapping[str, float] | None = None) -> ResolvedCosmologyState:
+        overrides = {} if cosmology_overrides is None else {str(name): float(value) for name, value in cosmology_overrides.items()}
+        if self._fixed_linear_input is not None:
+            if overrides:
+                names = ", ".join(sorted(overrides))
+                raise ValueError(
+                    "This PowerSpectrumTemplate was built from a fixed LinearPowerInput and cannot accept cosmology overrides. "
+                    f"Received: {names}."
+                )
+            if self._resolved_state is None:
+                self._resolved_state = ResolvedCosmologyState(
+                    cosmology=None,
+                    linear_input=self._fixed_linear_input,
+                    cosmology_params={},
+                    query_key=(),
+                )
+            return self._resolved_state
+
+        assert self._cosmology_provider is not None
+        state = self._cosmology_provider.resolve(
+            overrides=overrides,
+            z=float(self.z),
+            k=self.k,
+            settings=self.settings,
+            input_recipe=self.input_recipe,
+        )
+        if self._resolved_state is None or self._resolved_state.query_key != state.query_key:
+            self._resolved_state = state
+        return self._resolved_state
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class GalaxyPowerSpectrumMultipolesTheory:
-    """Native galaxy multipole theory evaluated from a normalized template.
-
-    This is the default multipole theory surface. It precomputes the native
-    basis on the requested evaluation grid and reuses that state across
-    repeated nuisance-parameter evaluations.
-    """
     template: PowerSpectrumTemplate
     k: np.ndarray
     return_components: bool = False
-    basis: BasisSpectra | None = field(init=False)
+    _basis: BasisSpectra | None = field(init=False, default=None, repr=False)
+    _basis_query_key: tuple[tuple[str, Any], ...] | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
-        """Validate the evaluation grid and prepare the native basis."""
-        eval_k = np.asarray(self.k, dtype=float)
-        if eval_k.ndim != 1:
+        self.k = np.asarray(self.k, dtype=float)
+        if self.k.ndim != 1:
             raise ValueError("GalaxyPowerSpectrumMultipolesTheory.k must be a one-dimensional array.")
-        object.__setattr__(self, "k", eval_k)
-        if self.template.settings.backend == "native":
-            basis = compute_basis(
-                self.template.linear_input,
-                settings=self.template.settings,
-                k=eval_k,
-            )
-        elif self.template.settings.backend == "classpt":
-            basis = None
-            self._require_classpt_cosmo()
-        else:
+        if self.template.settings.backend not in {"native", "classpt"}:
             raise ValueError(f"Unsupported multipole backend '{self.template.settings.backend}'.")
-        object.__setattr__(self, "basis", basis)
-
-    def __call__(
-        self,
-        parameters: EFTBiasParams | Mapping[str, float],
-        *,
-        return_components: bool | None = None,
-    ) -> MultipolePrediction:
-        """Evaluate galaxy multipoles for a set of EFT bias parameters."""
-        params = _normalize_eft_params(parameters)
-        requested_components = self.return_components if return_components is None else return_components
-        if self.template.settings.backend == "classpt":
-            if requested_components:
-                raise NotImplementedError("CLASS-PT reference predictions do not expose decomposed multipole components through GalaxyPowerSpectrumMultipolesTheory.")
-            prediction = predict_classpt_multipoles(
-                _require_classpt_cosmo(self.template, self.__class__.__name__),
-                self.k,
-                self.z,
-                params,
-            )
-        else:
-            prediction = galaxy_multipoles(
-                self.basis,
-                params,
-                return_components=requested_components,
-            )
-        return _finalize_multipole_prediction(
-            prediction,
-            theory_name=self.__class__.__name__,
-            template_name=self.template.__class__.__name__,
-        )
+        if self.template.settings.backend == "classpt" and not self.template.is_queryable:
+            if self.template.linear_input.metadata.get("_classpt_cosmo") is None:
+                raise ValueError("GalaxyPowerSpectrumMultipolesTheory requires a template built from a live classy.Class cosmology.")
 
     @property
     def settings(self) -> PTSettings:
@@ -307,66 +263,121 @@ class GalaxyPowerSpectrumMultipolesTheory:
 
     @property
     def z(self) -> float:
-        return self.template.z
+        return float(self.template.z)
 
-    def _require_classpt_cosmo(self):
-        return _require_classpt_cosmo(self.template, self.__class__.__name__)
+    def _split_query(self, query: Mapping[str, float]) -> tuple[EFTBiasParams, dict[str, float]]:
+        nuisance, cosmology, unknown = {}, {}, []
+        for name, value in query.items():
+            if name in _EFT_PARAM_NAMES:
+                nuisance[name] = value
+            elif self.template.is_queryable and name in self.template.cosmology_param_names:
+                cosmology[name] = value
+            elif self.template.is_queryable and name in _COSMOLOGY_ALIAS_NAMES:
+                cosmology[name] = value
+            elif (not self.template.is_queryable) and name in _COMMON_COSMOLOGY_PARAM_NAMES:
+                cosmology[name] = value
+            else:
+                unknown.append(name)
+        if unknown:
+            raise ValueError(f"unexpected parameters: {', '.join(sorted(unknown))}")
+        return _normalize_nuisance_params(nuisance), cosmology
+
+    def __call__(
+        self,
+        parameters: EFTBiasParams | Mapping[str, float] | None = None,
+        *,
+        return_components: bool | None = None,
+        **kwargs: float,
+    ) -> MultipolePrediction:
+        query = _normalize_flat_query(parameters, kwargs)
+        nuisance_params, cosmology_params = self._split_query(query)
+        requested_components = self.return_components if return_components is None else return_components
+        state = self.template.resolve(cosmology_params)
+
+        if self.template.settings.backend == "classpt":
+            if requested_components:
+                raise NotImplementedError(
+                    "CLASS-PT reference predictions do not expose decomposed multipole components through GalaxyPowerSpectrumMultipolesTheory."
+                )
+            cosmo = state.cosmology
+            if cosmo is None:
+                cosmo = state.linear_input.metadata.get("_classpt_cosmo")
+            if cosmo is None:
+                raise ValueError("CLASS-PT predictions require a queryable cosmology-backed template.")
+            prediction = predict_classpt_multipoles(
+                cosmo,
+                self.k,
+                self.z,
+                nuisance_params,
+            )
+        else:
+            if self._basis is None or self._basis_query_key != state.query_key:
+                self._basis = compute_basis(state.linear_input, settings=self.template.settings, k=self.k)
+                self._basis_query_key = state.query_key
+            prediction = galaxy_multipoles(
+                self._basis,
+                nuisance_params,
+                return_components=requested_components,
+            )
+
+        return _finalize_multipole_prediction(
+            prediction,
+            theory_name=self.__class__.__name__,
+            template_name=self.template.__class__.__name__,
+        )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(slots=True)
 class ClassPTGalaxyPowerSpectrumMultipolesTheory:
-    """Direct `CLASS-PT` multipole theory evaluated through the shared API.
-
-    Unlike the native theory class, this class does not precompute a native
-    basis. It forwards evaluations to the live `classy` object stored in the
-    template's linear-input metadata.
-    """
     template: PowerSpectrumTemplate
     k: np.ndarray
     return_components: bool = False
 
     def __post_init__(self) -> None:
-        """Validate the evaluation grid and require a live `classy` cosmology."""
-        eval_k = np.asarray(self.k, dtype=float)
-        if eval_k.ndim != 1:
+        self.k = np.asarray(self.k, dtype=float)
+        if self.k.ndim != 1:
             raise ValueError("ClassPTGalaxyPowerSpectrumMultipolesTheory.k must be a one-dimensional array.")
-        object.__setattr__(self, "k", eval_k)
-        self._require_classpt_cosmo()
+        if not self.template.is_queryable and self.template.linear_input.metadata.get("_classpt_cosmo") is None:
+            raise ValueError("ClassPTGalaxyPowerSpectrumMultipolesTheory requires a template built from a live classy.Class cosmology.")
+
+    @property
+    def settings(self) -> PTSettings:
+        return self.template.settings
+
+    @property
+    def linear_input(self) -> LinearPowerInput:
+        return self.template.linear_input
+
+    @property
+    def z(self) -> float:
+        return float(self.template.z)
 
     def __call__(
         self,
-        parameters: EFTBiasParams | Mapping[str, float],
+        parameters: EFTBiasParams | Mapping[str, float] | None = None,
         *,
         return_components: bool | None = None,
+        **kwargs: float,
     ) -> MultipolePrediction:
-        """Evaluate direct `CLASS-PT` multipoles for a set of EFT bias parameters."""
-        params = _normalize_eft_params(parameters)
+        query = _normalize_flat_query(parameters, kwargs)
+        nuisance, cosmology = GalaxyPowerSpectrumMultipolesTheory._split_query(self, query)
         requested_components = self.return_components if return_components is None else return_components
         if requested_components:
             raise NotImplementedError("CLASS-PT reference predictions do not expose decomposed multipole components.")
+        state = self.template.resolve(cosmology)
+        cosmo = state.cosmology
+        if cosmo is None:
+            cosmo = state.linear_input.metadata.get("_classpt_cosmo")
+        if cosmo is None:
+            raise ValueError("CLASS-PT predictions require a queryable cosmology-backed template.")
         prediction = predict_classpt_multipoles(
-            self._require_classpt_cosmo(),
+            cosmo,
             self.k,
             self.z,
-            params,
+            nuisance,
         )
         return _finalize_multipole_prediction(
             prediction,
             theory_name=self.__class__.__name__,
             template_name=self.template.__class__.__name__,
         )
-
-    @property
-    def settings(self) -> PTSettings:
-        return self.template.settings
-
-    @property
-    def linear_input(self) -> LinearPowerInput:
-        return self.template.linear_input
-
-    @property
-    def z(self) -> float:
-        return self.template.z
-
-    def _require_classpt_cosmo(self):
-        return _require_classpt_cosmo(self.template, self.__class__.__name__)
