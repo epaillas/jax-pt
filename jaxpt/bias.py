@@ -1,0 +1,123 @@
+from __future__ import annotations
+
+import jax.numpy as jnp
+
+from .config import EFTBiasParams
+from .reference.classpt import BasisSpectra, MultipolePrediction
+
+
+def _c(basis: BasisSpectra, name: str) -> jnp.ndarray:
+    return basis.components[name]
+
+
+def matter_real_spectrum(basis: BasisSpectra, cs: float) -> jnp.ndarray:
+    h = basis.h
+    return (_c(basis, "real_tree_matter") + _c(basis, "real_loop_matter") + 2.0 * cs * _c(basis, "real_counterterm_shape") / h**2) * h**3
+
+
+def galaxy_real_spectrum(
+    basis: BasisSpectra,
+    b1: float,
+    b2: float,
+    bG2: float,
+    bGamma3: float,
+    cs: float,
+    cs0: float,
+    Pshot: float,
+) -> jnp.ndarray:
+    h = basis.h
+    return (
+        b1**2 * _c(basis, "real_loop_matter")
+        + b1**2 * _c(basis, "real_tree_matter")
+        + 2.0 * (cs * b1**2 + cs0 * b1) * _c(basis, "real_counterterm_shape") / h**2
+        + b1 * b2 * _c(basis, "real_cross_b1_b2")
+        + 0.25 * b2**2 * _c(basis, "real_loop_b2_b2")
+        + 2.0 * b1 * bG2 * _c(basis, "real_cross_b1_bG2")
+        + b1 * (2.0 * bG2 + 0.8 * bGamma3) * _c(basis, "real_gamma3")
+        + bG2**2 * _c(basis, "real_loop_bG2_bG2")
+        + b2 * bG2 * _c(basis, "real_loop_b2_bG2")
+    ) * h**3 + Pshot
+
+
+def galaxy_multipoles(
+    basis: BasisSpectra,
+    params: EFTBiasParams,
+    return_components: bool = False,
+) -> MultipolePrediction:
+    h = basis.h
+    f = basis.growth_rate
+    b1 = params.b1
+    b2 = params.b2
+    bG2 = params.bG2
+    bGamma3 = params.bGamma3
+
+    p0_core = (
+        _c(basis, "rsd_l0_mm_00")
+        + _c(basis, "rsd_l0_loop_00")
+        + b1 * _c(basis, "rsd_l0_mm_01")
+        + b1 * _c(basis, "rsd_l0_loop_01")
+        + b1**2 * _c(basis, "rsd_l0_mm_11")
+        + b1**2 * _c(basis, "rsd_l0_loop_11")
+        + 0.25 * b2**2 * _c(basis, "real_loop_b2_b2")
+        + b1 * b2 * _c(basis, "rsd_l0_b1_b2")
+        + b2 * _c(basis, "rsd_l0_b2")
+        + b1 * bG2 * _c(basis, "rsd_l0_b1_bG2")
+        + bG2 * _c(basis, "rsd_l0_bG2")
+        + b2 * bG2 * _c(basis, "real_loop_b2_bG2")
+        + bG2**2 * _c(basis, "real_loop_bG2_bG2")
+        + 2.0 * params.cs0 * _c(basis, "rsd_l0_counterterm_shape") / h**2
+        + (2.0 * bG2 + 0.8 * bGamma3) * (b1 * _c(basis, "rsd_l0_gamma3_b1") + _c(basis, "rsd_l0_gamma3_bias"))
+    ) * h**3
+
+    p2_core = (
+        _c(basis, "rsd_l2_mm_00")
+        + _c(basis, "rsd_l2_loop_00")
+        + b1 * _c(basis, "rsd_l2_loop_01")
+        + b1 * _c(basis, "rsd_l2_mm_01")
+        + b1**2 * _c(basis, "rsd_l2_11")
+        + b1 * b2 * _c(basis, "rsd_l2_b1_b2")
+        + b2 * _c(basis, "rsd_l2_b2")
+        + b1 * bG2 * _c(basis, "rsd_l2_b1_bG2")
+        + bG2 * _c(basis, "rsd_l2_bG2")
+        + 2.0 * params.cs2 * _c(basis, "rsd_l2_counterterm_shape") / h**2
+        + (2.0 * bG2 + 0.8 * bGamma3) * _c(basis, "rsd_l2_gamma3")
+    ) * h**3
+
+    p4_core = (
+        _c(basis, "rsd_l4_mm_00")
+        + _c(basis, "rsd_l4_loop_00")
+        + b1 * _c(basis, "rsd_l4_loop_01")
+        + b1**2 * _c(basis, "rsd_l4_loop_11")
+        + b2 * _c(basis, "rsd_l4_b2")
+        + bG2 * _c(basis, "rsd_l4_bG2")
+        + 2.0 * params.cs4 * _c(basis, "rsd_l4_counterterm_shape") / h**2
+    ) * h**3
+
+    b4_shape = (35.0 / 8.0) * _c(basis, "rsd_l4_counterterm_shape") * h
+    p0_b4 = f**2 * params.b4 * _c(basis, "k_over_h_squared") * (f**2 / 9.0 + 2.0 * f * b1 / 7.0 + b1**2 / 5.0) * b4_shape
+    p2_b4 = f**2 * params.b4 * _c(basis, "k_over_h_squared") * ((f**2 * 70.0 + 165.0 * f * b1 + 99.0 * b1**2) * 4.0 / 693.0) * b4_shape
+    p4_b4 = f**2 * params.b4 * _c(basis, "k_over_h_squared") * ((f**2 * 210.0 + 390.0 * f * b1 + 143.0 * b1**2) * 8.0 / 5005.0) * b4_shape
+
+    p0 = p0_core + params.Pshot + p0_b4
+    p2 = p2_core + p2_b4
+    p4 = p4_core + p4_b4
+
+    components = None
+    if return_components:
+        components = {
+            "p0_core": p0_core,
+            "p0_b4": p0_b4,
+            "p2_core": p2_core,
+            "p2_b4": p2_b4,
+            "p4_core": p4_core,
+            "p4_b4": p4_b4,
+        }
+
+    return MultipolePrediction(
+        k=basis.k,
+        p0=p0,
+        p2=p2,
+        p4=p4,
+        components=components,
+        metadata={"backend": basis.metadata.get("backend", "unknown"), "z": basis.z},
+    )
