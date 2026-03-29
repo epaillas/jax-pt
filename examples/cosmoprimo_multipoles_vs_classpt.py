@@ -7,13 +7,13 @@ import sys
 import matplotlib.pyplot as plt
 import numpy as np
 from classy import Class
+from cosmoprimo import Cosmology
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from jaxpt import EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
-from jaxpt.cosmology import build_classpt_native_grid_parity_linear_input_from_classy
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -43,12 +43,12 @@ EVAL_K = np.linspace(0.01, 0.2, 128)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Compare native jaxpt one-loop galaxy multipoles against direct CLASS-PT multipoles."
+        description="Compare native jaxpt one-loop galaxy multipoles from a cosmoprimo power template against direct CLASS-PT multipoles."
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(__file__).with_name("native_multipoles_vs_classpt.png"),
+        default=Path(__file__).with_name("cosmoprimo_multipoles_vs_classpt.png"),
         help="Path to the output PNG file.",
     )
     parser.add_argument(
@@ -79,19 +79,30 @@ def main() -> None:
         b4=10.0,
     )
 
-    cosmo = Class()
-    cosmo.set({**FIDUCIAL_COSMOLOGY, **PT_OPTIONS_NOIR, "z_pk": z})
-    cosmo.compute()
+    cosmoprimo_cosmo = Cosmology(
+        engine="class",
+        h=FIDUCIAL_COSMOLOGY["h"],
+        omega_b=FIDUCIAL_COSMOLOGY["omega_b"],
+        omega_cdm=FIDUCIAL_COSMOLOGY["omega_cdm"],
+        n_s=FIDUCIAL_COSMOLOGY["n_s"],
+        tau_reio=FIDUCIAL_COSMOLOGY["tau_reio"],
+        YHe=FIDUCIAL_COSMOLOGY["YHe"],
+        N_ur=FIDUCIAL_COSMOLOGY["N_ur"],
+        m_ncdm=FIDUCIAL_COSMOLOGY["m_ncdm"],
+        logA=np.log(1.0e10 * FIDUCIAL_COSMOLOGY["A_s"]),
+        z_pk=[z],
+        kmax_pk=10.0,
+    )
 
-    # Use the CLASS-PT internal tree-basis spectrum here so this example targets
-    # backend parity rather than the default native `pk_lin` input convention.
     native_settings = PTSettings(ir_resummation=False, backend="native")
-    linear_input = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=native_settings)
-    native_template = PowerSpectrumTemplate.from_linear_input(linear_input, settings=native_settings)
-    native = GalaxyPowerSpectrumMultipolesTheory(template=native_template, k=EVAL_K)(params)
+    template = PowerSpectrumTemplate.from_cosmoprimo(cosmoprimo_cosmo, z=z, k=np.logspace(-5.0, 1.0, 256), settings=native_settings)
+    native = GalaxyPowerSpectrumMultipolesTheory(template=template, k=EVAL_K)(params)
 
+    classpt_cosmo = Class()
+    classpt_cosmo.set({**FIDUCIAL_COSMOLOGY, **PT_OPTIONS_NOIR, "z_pk": z})
+    classpt_cosmo.compute()
     classpt_settings = PTSettings(ir_resummation=False, backend="classpt")
-    classpt_template = PowerSpectrumTemplate.from_classy(cosmo, z=z, k=np.logspace(-5.0, 1.0, 256), settings=classpt_settings)
+    classpt_template = PowerSpectrumTemplate.from_classy(classpt_cosmo, z=z, k=np.logspace(-5.0, 1.0, 256), settings=classpt_settings)
     classpt = GalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=EVAL_K)(params)
 
     spectra = [
@@ -113,7 +124,7 @@ def main() -> None:
         ax_top = axes[0, column]
         ax_bottom = axes[1, column]
 
-        ax_top.plot(EVAL_K, EVAL_K * native_values, lw=2.0, label="jaxpt")
+        ax_top.plot(EVAL_K, EVAL_K * native_values, lw=2.0, label="jaxpt via cosmoprimo")
         ax_top.plot(EVAL_K, EVAL_K * classpt_values, lw=2.0, ls="--", label="CLASS-PT")
         ax_top.set_title(label)
         ax_top.set_ylabel(r"$k\,P_\ell(k)$")
@@ -131,7 +142,7 @@ def main() -> None:
         ax_bottom.set_ylim(-limit, limit)
 
     axes[0, 0].legend(loc="best")
-    fig.suptitle("Native One-Loop Galaxy Multipoles vs Direct CLASS-PT, z = 0.5")
+    fig.suptitle("Cosmoprimo Power Template vs Direct CLASS-PT, z = 0.5")
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.output, dpi=160)

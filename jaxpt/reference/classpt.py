@@ -4,6 +4,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import jax.numpy as jnp
+import numpy as np
+
+from ..config import EFTBiasParams
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,3 +73,27 @@ PK_MULT_INDEX = {
 }
 
 BASIS_COMPONENT_NAMES = tuple(PK_MULT_INDEX.keys()) + ("k_over_h_squared",)
+
+
+def predict_classpt_multipoles(
+    cosmo: Any,
+    k: np.ndarray,
+    z: float,
+    params: EFTBiasParams,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> MultipolePrediction:
+    eval_k = np.asarray(k, dtype=float)
+    cosmo.initialize_output(eval_k, float(z), len(eval_k))
+
+    prediction_metadata = {"backend": "classpt", "z": float(z)}
+    if metadata:
+        prediction_metadata.update(metadata)
+
+    return MultipolePrediction(
+        k=eval_k,
+        p0=np.asarray(cosmo.pk_gg_l0(params.b1, params.b2, params.bG2, params.bGamma3, params.cs0, params.Pshot, params.b4)),
+        p2=np.asarray(cosmo.pk_gg_l2(params.b1, params.b2, params.bG2, params.bGamma3, params.cs2, params.b4)),
+        p4=np.asarray(cosmo.pk_gg_l4(params.b1, params.b2, params.bG2, params.bGamma3, params.cs4, params.b4)),
+        metadata=prediction_metadata,
+    )

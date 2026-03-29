@@ -10,7 +10,7 @@ from .bias import galaxy_multipoles
 from .config import EFTBiasParams, PTSettings
 from .cosmology import LinearPowerInput, build_linear_input_from_classy, build_linear_input_from_cosmoprimo
 from .native import compute_basis
-from .reference.classpt import BasisSpectra, MultipolePrediction
+from .reference.classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
 
 
 _EFT_PARAM_NAMES = tuple(param.name for param in fields(EFTBiasParams))
@@ -99,22 +99,25 @@ class GalaxyPowerSpectrumMultipolesTheory:
     template: PowerSpectrumTemplate
     k: np.ndarray
     return_components: bool = False
-    basis: BasisSpectra = field(init=False)
+    basis: BasisSpectra | None = field(init=False)
 
     def __post_init__(self) -> None:
         eval_k = np.asarray(self.k, dtype=float)
         if eval_k.ndim != 1:
             raise ValueError("GalaxyPowerSpectrumMultipolesTheory.k must be a one-dimensional array.")
         object.__setattr__(self, "k", eval_k)
-        object.__setattr__(
-            self,
-            "basis",
-            compute_basis(
+        if self.template.settings.backend == "native":
+            basis = compute_basis(
                 self.template.linear_input,
                 settings=self.template.settings,
                 k=eval_k,
-            ),
-        )
+            )
+        elif self.template.settings.backend == "classpt":
+            basis = None
+            self._require_classpt_cosmo()
+        else:
+            raise ValueError(f"Unsupported multipole backend '{self.template.settings.backend}'.")
+        object.__setattr__(self, "basis", basis)
 
     def __call__(
         self,
@@ -123,11 +126,22 @@ class GalaxyPowerSpectrumMultipolesTheory:
         return_components: bool | None = None,
     ) -> MultipolePrediction:
         params = _normalize_eft_params(parameters)
-        prediction = galaxy_multipoles(
-            self.basis,
-            params,
-            return_components=self.return_components if return_components is None else return_components,
-        )
+        requested_components = self.return_components if return_components is None else return_components
+        if self.template.settings.backend == "classpt":
+            if requested_components:
+                raise NotImplementedError("CLASS-PT reference predictions do not expose decomposed multipole components through GalaxyPowerSpectrumMultipolesTheory.")
+            prediction = predict_classpt_multipoles(
+                self._require_classpt_cosmo(),
+                self.k,
+                self.z,
+                params,
+            )
+        else:
+            prediction = galaxy_multipoles(
+                self.basis,
+                params,
+                return_components=requested_components,
+            )
         metadata = dict(prediction.metadata)
         metadata.update(
             {
@@ -155,3 +169,11 @@ class GalaxyPowerSpectrumMultipolesTheory:
     @property
     def z(self) -> float:
         return self.template.z
+
+    def _require_classpt_cosmo(self):
+        cosmo = self.template.linear_input.metadata.get("_classpt_cosmo")
+        if cosmo is None:
+            raise ValueError(
+                "GalaxyPowerSpectrumMultipolesTheory with settings.backend == 'classpt' requires a template built from a live classy.Class cosmology."
+            )
+        return cosmo

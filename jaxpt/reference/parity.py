@@ -5,7 +5,7 @@ from typing import Any
 import numpy as np
 
 from ..config import EFTBiasParams
-from .classpt import BasisSpectra, MultipolePrediction
+from .classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
 
 
 def compare_predictions(lhs: MultipolePrediction, rhs: MultipolePrediction) -> dict[str, dict[str, float]]:
@@ -29,12 +29,11 @@ def compare_multipoles_to_classpt(
 ) -> dict[str, dict[str, float]]:
     k = np.asarray(prediction.k, dtype=float)
     z = float(prediction.metadata["z"])
-    cosmo.initialize_output(k, z, len(k))
-    reference = MultipolePrediction(
-        k=prediction.k,
-        p0=np.asarray(cosmo.pk_gg_l0(params.b1, params.b2, params.bG2, params.bGamma3, params.cs0, params.Pshot, params.b4)),
-        p2=np.asarray(cosmo.pk_gg_l2(params.b1, params.b2, params.bG2, params.bGamma3, params.cs2, params.b4)),
-        p4=np.asarray(cosmo.pk_gg_l4(params.b1, params.b2, params.bG2, params.bGamma3, params.cs4, params.b4)),
+    reference = predict_classpt_multipoles(
+        cosmo,
+        k,
+        z,
+        params,
         metadata={"backend": "classpt_reference"},
     )
     return compare_predictions(prediction, reference)
