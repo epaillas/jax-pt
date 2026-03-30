@@ -2,6 +2,11 @@ template: power_spectrum
 parameters:
   A_s:
     value: 2.089e-9
+    fixed: true
+    prior:
+      type: flat
+      min: 2.0e-9
+      max: 3.5e-9
   n_s:
     value: 0.9649
   tau_reio:
