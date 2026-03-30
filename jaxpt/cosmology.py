@@ -461,9 +461,49 @@ _CLASSY_FIXED_PARAM_NAMES = frozenset(
 )
 _COSMOPRIMO_FIXED_PARAM_NAMES = frozenset({"z_pk", "kmax_pk", "ellmax_cl", "non_linear", "modes", "lensing"})
 _COSMOLOGY_ALIAS_GROUPS = (
-    ("A_s", "logA", "ln10^10A_s"),
+    ("logA", "A_s", "ln10^10A_s"),
     ("h", "H0"),
 )
+
+
+def _a_s_to_log_a(value: Any) -> float:
+    return float(np.log(1.0e10 * float(value)))
+
+
+def _log_a_to_a_s(value: Any) -> float:
+    return float(np.exp(float(value)) / 1.0e10)
+
+
+def _to_public_cosmology_value(canonical: str, name: str, value: Any) -> Any:
+    if canonical == "logA":
+        if name == "A_s":
+            return _a_s_to_log_a(value)
+        return float(value)
+    if canonical == "h" and name == "H0":
+        return float(value) / 100.0
+    return value
+
+
+def _convert_public_cosmology_params_to_backend(params: Mapping[str, Any]) -> dict[str, Any]:
+    converted: dict[str, Any] = {}
+    for name, value in params.items():
+        if name == "logA":
+            converted["A_s"] = _log_a_to_a_s(value)
+        else:
+            converted[str(name)] = value
+    return converted
+
+
+def _convert_backend_cosmology_params_to_public(params: Mapping[str, Any]) -> dict[str, Any]:
+    converted: dict[str, Any] = {}
+    for name, value in params.items():
+        if name == "A_s":
+            converted["logA"] = _a_s_to_log_a(value)
+        elif name == "H0":
+            converted["h"] = float(value) / 100.0
+        else:
+            converted[str(name)] = value
+    return converted
 
 
 def _freeze_cache_value(value: Any) -> Any:
@@ -502,35 +542,30 @@ def _normalize_cosmology_overrides(overrides: dict[str, Any]) -> dict[str, Any]:
     for canonical, *aliases in _COSMOLOGY_ALIAS_GROUPS:
         values = [(name, normalized[name]) for name in (canonical, *aliases) if name in normalized]
         if len(values) > 1:
-            first_value = values[0][1]
+            first_value = _to_public_cosmology_value(canonical, values[0][0], values[0][1])
             for name, value in values[1:]:
-                if not np.allclose(np.asarray(value), np.asarray(first_value), rtol=0.0, atol=0.0):
+                public_value = _to_public_cosmology_value(canonical, name, value)
+                if not np.allclose(np.asarray(public_value), np.asarray(first_value), rtol=1.0e-12, atol=1.0e-12):
                     names = ", ".join(name for name, _ in values)
                     raise ValueError(f"Conflicting cosmology aliases provided for {canonical}: {names}.")
         if not values:
             continue
-        _, value = values[-1]
+        name, value = values[-1]
         for name, _ in values:
             del normalized[name]
-        if canonical == "A_s":
-            if any(name in overrides for name in ("logA", "ln10^10A_s")):
-                value = np.exp(float(value)) / 1.0e10
-        elif canonical == "h":
-            if "H0" in overrides:
-                value = float(value) / 100.0
-        normalized[canonical] = value
+        normalized[canonical] = _to_public_cosmology_value(canonical, name, value)
     return normalized
 
 
 def _extract_classy_fiducial_params(cosmo: Any) -> dict[str, Any]:
-    return dict(getattr(cosmo, "pars", {}))
+    return _convert_backend_cosmology_params_to_public(dict(getattr(cosmo, "pars", {})))
 
 
 def _extract_cosmoprimo_fiducial_params(cosmo: Any) -> dict[str, Any]:
     params = {
         "h": float(cosmo["h"]),
         "n_s": float(cosmo["n_s"]),
-        "A_s": float(cosmo["A_s"]),
+        "logA": _a_s_to_log_a(float(cosmo["A_s"])),
     }
     for name in ["omega_b", "omega_cdm", "tau_reio", "YHe", "N_ur", "Omega_k", "w0_fld", "wa_fld"]:
         try:
@@ -649,7 +684,7 @@ class BaseCosmologyProvider:
             raise ValueError(f"Unexpected cosmology parameters: {', '.join(invalid)}")
         cosmology_params = dict(self.fiducial_params)
         cosmology_params.update(normalized)
-        cosmology = self.build_cosmology(cosmology_params)
+        cosmology = self.build_cosmology(_convert_public_cosmology_params_to_backend(cosmology_params))
         linear_input = self.build_linear_input(cosmology=cosmology, z=z, k=k, settings=settings, input_recipe=input_recipe)
         return ResolvedCosmologyState(
             cosmology=cosmology,

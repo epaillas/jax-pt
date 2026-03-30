@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from jaxpt import BaseSampler, PocoMCSampler
+from jaxpt import BaseSampler, PocoMCSampler, TaylorEmulator
 from jaxpt.parameter import ParameterCollection
 from jaxpt.reference.classpt import MultipolePrediction
 
@@ -124,3 +124,21 @@ def test_pocomc_sampler_runs_tiny_smoke_test() -> None:
     assert posterior["samples"].ndim == 2
     assert posterior["samples"].shape[1] == 1
     assert posterior["parameter_names"] == ("x",)
+
+
+def test_taylor_emulator_accepts_loga_alias_for_old_as_parameter() -> None:
+    class ToyTheory:
+        def __call__(self, params):
+            return np.asarray([params["A_s"]], dtype=float)
+
+    emulator = TaylorEmulator(
+        theory_fn=ToyTheory(),
+        fiducial={"A_s": 2.089e-9},
+        order=1,
+        step_sizes={"A_s": 1.0e-11},
+        param_names=["A_s"],
+        valid_param_names=["A_s"],
+    ).build()
+
+    predicted = emulator.predict({"logA": np.log(1.0e10 * 2.2e-9)})
+    np.testing.assert_allclose(predicted, np.asarray([2.2e-9]), rtol=0.0, atol=1e-15)

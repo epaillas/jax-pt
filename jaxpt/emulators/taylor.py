@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from ..cosmology import _convert_public_cosmology_params_to_backend, _normalize_cosmology_overrides
 from ..parameter import Parameter, ParameterCollection
 from ..reference.classpt import MultipolePrediction
 
@@ -54,6 +55,16 @@ def _freeze_cache_value(value: Any) -> Any:
     if isinstance(value, (str, bool, int, float)) or value is None:
         return value
     return repr(value)
+
+
+def _normalize_cosmology_alias_query(
+    params: Mapping[str, float],
+    valid_param_names: tuple[str, ...],
+) -> dict[str, float]:
+    normalized = _normalize_cosmology_overrides(dict(params))
+    if "logA" in normalized and "logA" not in valid_param_names and "A_s" in valid_param_names:
+        normalized = _convert_public_cosmology_params_to_backend(normalized)
+    return {str(name): float(value) for name, value in normalized.items()}
 
 
 def _serialize_parameter_collection(params: ParameterCollection) -> list[dict[str, Any]]:
@@ -486,6 +497,7 @@ class TaylorEmulator:
         if not self.is_built or self._coefficients is None or self._output_state is None or self._output_adapter is None:
             raise ValueError("TaylorEmulator must be built or loaded before predict().")
 
+        params = _normalize_cosmology_alias_query(params, self._valid_param_names)
         unknown = sorted(set(params) - set(self._valid_param_names))
         if unknown:
             raise ValueError(f"Unexpected emulator parameters: {', '.join(unknown)}.")

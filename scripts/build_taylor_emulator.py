@@ -20,7 +20,7 @@ from jaxpt.theories import (
 )
 
 
-DEFAULT_FREE_COSMOLOGY = ("A_s", "omega_cdm")
+DEFAULT_FREE_COSMOLOGY = ("logA", "omega_cdm")
 
 
 def _parse_assignment(text: str) -> tuple[str, float]:

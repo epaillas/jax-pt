@@ -15,6 +15,7 @@ def test_parameter_yaml_loaders_preserve_values_and_statuses() -> None:
     template_params = load_power_spectrum_template_parameters()
     nuisance_params = load_galaxy_power_spectrum_multipoles_parameters()
 
+    assert template_params["logA"].value == 3.0392705755684744
     assert template_params["omega_cdm"].value == 0.12
     assert template_params["Omega_k"].fixed is True
     assert template_params["w0_fld"].fixed is True
@@ -24,6 +25,7 @@ def test_parameter_yaml_loaders_preserve_values_and_statuses() -> None:
     assert nuisance_params["cs4"].marginalized is True
     assert nuisance_params["Pshot"].marginalized is True
     assert template_params["omega_b"].prior == {"type": "gaussian", "mean": 0.02233, "sigma": 0.00036}
+    assert template_params["logA"].prior == {"type": "flat", "min": 2.0, "max": 4.0}
     assert template_params["omega_cdm"].prior == {"type": "flat", "min": 0.05, "max": 0.2}
     assert template_params["h"].prior == {"type": "flat", "min": 0.4, "max": 1.0}
     assert template_params["m_ncdm"].prior == {"type": "flat", "min": 0.06, "max": 0.18}
@@ -47,12 +49,22 @@ def test_theory_exposes_merged_parameter_collection() -> None:
     theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=np.linspace(0.02, 0.1, 4))
 
     assert "omega_cdm" in theory.params
+    assert "logA" in theory.params
     assert "b1" in theory.params
     assert theory.params["omega_cdm"].value == 0.13
     assert theory.params["Omega_k"].fixed is True
 
     theory.params["omega_cdm"].update(marginalized=True)
     assert template.params["omega_cdm"].marginalized is True
+
+
+def test_template_normalizes_amplitude_aliases_to_public_loga() -> None:
+    template_from_as = PowerSpectrumTemplate({"A_s": 2.089e-9}, z=0.5, settings=PTSettings())
+    template_from_loga = PowerSpectrumTemplate({"logA": np.log(1.0e10 * 2.089e-9)}, z=0.5, settings=PTSettings())
+
+    assert "logA" in template_from_as.params
+    assert "A_s" not in template_from_as.params
+    np.testing.assert_allclose(template_from_as.params["logA"].value, template_from_loga.params["logA"].value, rtol=0.0, atol=1e-12)
 
 
 def test_theory_without_arguments_uses_default_parameter_configuration() -> None:

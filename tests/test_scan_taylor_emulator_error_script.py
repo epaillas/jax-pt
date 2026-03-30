@@ -31,7 +31,7 @@ def _build_small_emulator(tmp_path: Path):
     for name, value in nuisance_defaults.items():
         theory.params[name].update(value=value)
     for name in theory.template.params.names():
-        theory.params[name].update(fixed=name not in {"A_s", "omega_cdm"})
+        theory.params[name].update(fixed=name not in {"logA", "omega_cdm"})
 
     emulator = build_multipole_emulator(
         theory,
@@ -55,7 +55,7 @@ def test_scan_taylor_emulator_error_script_smoke(tmp_path) -> None:
             str(script),
             str(emulator.cache_path),
             "--param",
-            "A_s",
+            "logA",
             "--param",
             "omega_cdm",
             "--output",
@@ -68,8 +68,8 @@ def test_scan_taylor_emulator_error_script_smoke(tmp_path) -> None:
 
     assert output.exists()
     assert "Taylor emulator error scan" in result.stdout
-    assert "parameters: A_s, omega_cdm" in result.stdout
-    assert "A_s: step=" in result.stdout
+    assert "parameters: logA, omega_cdm" in result.stdout
+    assert "logA: step=" in result.stdout
     assert "omega_cdm: step=" in result.stdout
 
 

@@ -20,6 +20,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from jaxpt.cosmology import _normalize_cosmology_overrides
 from jaxpt import PTSettings, TaylorEmulator
 from jaxpt.theories import (
     GalaxyPowerSpectrumMultipolesTheory,
@@ -127,7 +128,7 @@ def _build_theory(emulator: TaylorEmulator, metadata: dict[str, object]) -> Gala
     nuisance_defaults = load_galaxy_power_spectrum_multipoles_parameters().defaults_dict()
     full_fiducial = dict(cosmology_defaults)
     full_fiducial.update(nuisance_defaults)
-    full_fiducial.update(emulator.fiducial)
+    full_fiducial.update(_normalize_cosmology_overrides(dict(emulator.fiducial)))
 
     settings = _resolve_settings(metadata)
     z = _resolve_z(metadata)
@@ -147,9 +148,11 @@ def _build_theory(emulator: TaylorEmulator, metadata: dict[str, object]) -> Gala
 def _resolve_query(emulator: TaylorEmulator, overrides: list[tuple[str, float]]) -> dict[str, float]:
     query = dict(emulator.fiducial)
     for name, value in overrides:
-        if name not in emulator.fiducial:
+        normalized = _normalize_cosmology_overrides({str(name): float(value)})
+        known = set(emulator.fiducial) | set(getattr(emulator, "_valid_param_names", ()))
+        if not set(normalized).issubset(known) and name not in known:
             raise ValueError(f"Unknown parameter override '{name}'.")
-        query[name] = float(value)
+        query.update(normalized)
     return query
 
 

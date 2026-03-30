@@ -30,7 +30,7 @@ def test_compare_taylor_emulator_script_smoke(tmp_path) -> None:
     for name, value in nuisance_defaults.items():
         theory.params[name].update(value=value)
     for name in theory.template.params.names():
-        theory.params[name].update(fixed=name not in {"A_s", "omega_cdm"})
+        theory.params[name].update(fixed=name not in {"logA", "omega_cdm"})
 
     emulator = build_multipole_emulator(
         theory,
@@ -50,7 +50,7 @@ def test_compare_taylor_emulator_script_smoke(tmp_path) -> None:
             str(script),
             str(emulator.cache_path),
             "--param",
-            "A_s=2.05e-9",
+            "logA=3.02",
             "--param",
             "omega_cdm=0.121",
             "--output",

@@ -15,6 +15,7 @@ from ..cosmology import (
     CosmoprimoCosmologyProvider,
     LinearPowerInput,
     ResolvedCosmologyState,
+    _normalize_cosmology_overrides,
 )
 from ..basis import compute_basis
 from ..reference.classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
@@ -50,7 +51,8 @@ def _build_provider(
     if _is_cosmoprimo_cosmology(source):
         return CosmoprimoCosmologyProvider.from_cosmology(source)
     if isinstance(source, Mapping):
-        source = {**_TEMPLATE_DEFAULTS, **{str(name): float(value) for name, value in source.items()}}
+        merged = {**_TEMPLATE_DEFAULTS, **{str(name): float(value) for name, value in source.items()}}
+        source = _normalize_cosmology_overrides(merged)
         if provider is None:
             provider = "classy"
         if provider == "classy":
