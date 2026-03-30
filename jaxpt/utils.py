@@ -59,7 +59,11 @@ def load_pgg_mock_matrix(
         k_mock, poles = load_pgg_data_vector(path, ells=ells, rebin=rebin, kmin=kmin, kmax=kmax)
         if target_k is None:
             target_k = np.asarray(k_mock, dtype=float)
-        elif not np.allclose(k_mock, target_k, rtol=1.0e-10, atol=1.0e-12):
+        else:
+            same_grid = k_mock.shape == target_k.shape and np.allclose(k_mock, target_k, rtol=1.0e-10, atol=1.0e-12)
+            if same_grid:
+                rows.append(flatten_pgg_measurements(poles, ells=ells))
+                continue
             poles = {
                 ell: np.interp(target_k, np.asarray(k_mock, dtype=float), np.asarray(values, dtype=float))
                 for ell, values in poles.items()

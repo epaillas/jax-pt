@@ -90,3 +90,29 @@ def test_plot_simulation_script_writes_png(tmp_path: Path) -> None:
     assert "covariance_shape" in result.stdout
     assert output_path.exists()
     assert output_path.stat().st_size > 0
+
+
+def test_plot_simulation_script_writes_png_with_default_k_range(tmp_path: Path) -> None:
+    mock_dir = _build_small_mock_directory(tmp_path)
+    output_path = tmp_path / "measurements_default.png"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "plot_simulation_pgg_measurements.py"),
+            "--data",
+            str(DATA_VECTOR_PATH),
+            "--mocks",
+            str(mock_dir),
+            "--output",
+            str(output_path),
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "n_k" in result.stdout
+    assert output_path.exists()
+    assert output_path.stat().st_size > 0
