@@ -10,6 +10,7 @@ from .emulators import TaylorEmulator, build_multipole_emulator
 from .parameter import Parameter, ParameterCollection
 from .reference.classpt import BasisSpectra, MultipolePrediction
 from .reference.parity import compare_multipoles_to_classpt, compare_predictions
+from .utils import covariance_errors, flatten_pgg_measurements, load_pgg_data_vector, load_pgg_mock_matrix, sample_covariance
 from .theories import (
     ClassPTGalaxyPowerSpectrumMultipolesTheory,
     GalaxyPowerSpectrumMultipolesTheory,
@@ -35,10 +36,15 @@ __all__ = [
     "build_realspace_predictor",
     "compare_multipoles_to_classpt",
     "compare_predictions",
+    "covariance_errors",
     "compute_basis",
+    "flatten_pgg_measurements",
     "galaxy_multipoles",
     "galaxy_real_spectrum",
+    "load_pgg_data_vector",
+    "load_pgg_mock_matrix",
     "load_galaxy_power_spectrum_multipoles_parameters",
     "load_power_spectrum_template_parameters",
     "matter_real_spectrum",
+    "sample_covariance",
 ]
