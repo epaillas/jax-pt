@@ -96,6 +96,12 @@ def _resolve_step_sizes(default_scale: float, explicit: list[tuple[str, float]])
     return {name: value for name, value in explicit}
 
 
+def _format_param_values(theory: GalaxyPowerSpectrumMultipolesTheory, names: list[str]) -> str:
+    if not names:
+        return "(none)"
+    return ", ".join(f"{name}={theory.params[name].value:g}" for name in names)
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
@@ -121,6 +127,26 @@ def main() -> None:
     step_sizes = _resolve_step_sizes(args.step_size_scale, args.step_size)
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
+    emulated_params = explicit_params if explicit_params else list(theory.params.emulated_names())
+    held_params = [name for name in theory.params.names() if name not in emulated_params]
+
+    print("Taylor emulator build")
+    print(f"  backend: {settings.backend}")
+    print(f"  provider: cosmoprimo")
+    print(f"  redshift: {args.z:g}")
+    print(f"  evaluation grid: nk={args.nk}, kmin={args.kmin:g}, kmax={args.kmax:g}")
+    print(f"  order: {args.order}")
+    print(f"  finite-difference accuracy: {args.finite_difference_accuracy}")
+    print(f"  output dir: {output_dir}")
+    print(f"  force rebuild: {args.force}")
+    print(f"  emulated parameters ({len(emulated_params)}): {_format_param_values(theory, emulated_params)}")
+    print(f"  held fixed or marginalized ({len(held_params)}): {_format_param_values(theory, held_params)}")
+    if isinstance(step_sizes, dict):
+        step_text = ", ".join(f"{name}={value:g}" for name, value in step_sizes.items())
+        print(f"  step sizes: {step_text}")
+    else:
+        print(f"  step-size scale: {step_sizes:g}")
+    print()
 
     emulator = build_multipole_emulator(
         theory,
@@ -136,8 +162,7 @@ def main() -> None:
 
     print(f"Saved emulator: {emulator.cache_path}")
     print(f"Emulated parameters: {', '.join(emulator.param_names)}")
-    held_fixed = [name for name in theory.params.names() if name not in emulator.param_names]
-    print(f"Held fixed or marginalized: {', '.join(held_fixed)}")
+    print(f"Held fixed or marginalized: {', '.join(held_params)}")
 
 
 if __name__ == "__main__":
