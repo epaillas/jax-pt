@@ -11,14 +11,30 @@ parameters:
   cs0:
     value: 0.0
     marginalized: true
+    prior:
+      type: flat
+      min: null
+      max: null
   cs2:
     value: 30.0
     marginalized: true
+    prior:
+      type: flat
+      min: null
+      max: null
   cs4:
     value: 0.0
     marginalized: true
+    prior:
+      type: flat
+      min: null
+      max: null
   Pshot:
     value: 3000.0
     marginalized: true
+    prior:
+      type: flat
+      min: 0.0
+      max: 10000.0
   b4:
     value: 10.0

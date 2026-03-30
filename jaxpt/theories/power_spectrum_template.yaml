@@ -8,10 +8,22 @@ parameters:
     value: 0.052
   omega_b:
     value: 0.02237
+    prior:
+      type: gaussian
+      mean: 0.02233
+      sigma: 0.00036
   omega_cdm:
     value: 0.12
+    prior:
+      type: flat
+      min: 0.05
+      max: 0.2
   h:
     value: 0.6736
+    prior:
+      type: flat
+      min: 0.4
+      max: 1.0
   YHe:
     value: 0.2425
   N_ur:
@@ -20,6 +32,10 @@ parameters:
     value: 1.0
   m_ncdm:
     value: 0.06
+    prior:
+      type: flat
+      min: 0.06
+      max: 0.18
   Omega_k:
     value: 0.0
     fixed: true

@@ -23,6 +23,14 @@ def test_parameter_yaml_loaders_preserve_values_and_statuses() -> None:
     assert nuisance_params["cs2"].marginalized is True
     assert nuisance_params["cs4"].marginalized is True
     assert nuisance_params["Pshot"].marginalized is True
+    assert template_params["omega_b"].prior == {"type": "gaussian", "mean": 0.02233, "sigma": 0.00036}
+    assert template_params["omega_cdm"].prior == {"type": "flat", "min": 0.05, "max": 0.2}
+    assert template_params["h"].prior == {"type": "flat", "min": 0.4, "max": 1.0}
+    assert template_params["m_ncdm"].prior == {"type": "flat", "min": 0.06, "max": 0.18}
+    assert nuisance_params["cs0"].prior == {"type": "flat", "min": None, "max": None}
+    assert nuisance_params["cs2"].prior == {"type": "flat", "min": None, "max": None}
+    assert nuisance_params["cs4"].prior == {"type": "flat", "min": None, "max": None}
+    assert nuisance_params["Pshot"].prior == {"type": "flat", "min": 0.0, "max": 10000.0}
 
 
 def test_parameter_update_changes_emulation_status() -> None:
