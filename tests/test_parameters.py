@@ -19,7 +19,10 @@ def test_parameter_yaml_loaders_preserve_values_and_statuses() -> None:
     assert template_params["Omega_k"].fixed is True
     assert template_params["w0_fld"].fixed is True
     assert nuisance_params["b1"].value == 2.0
-    assert nuisance_params["cs2"].marginalized is False
+    assert nuisance_params["cs0"].marginalized is True
+    assert nuisance_params["cs2"].marginalized is True
+    assert nuisance_params["cs4"].marginalized is True
+    assert nuisance_params["Pshot"].marginalized is True
 
 
 def test_parameter_update_changes_emulation_status() -> None:

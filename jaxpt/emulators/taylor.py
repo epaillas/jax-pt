@@ -16,6 +16,9 @@ from ..reference.classpt import MultipolePrediction
 _SERIALIZATION_VERSION = 1
 
 
+ProgressCallback = Callable[[int, int], None]
+
+
 def _normalize_query(
     parameters: Mapping[str, float] | None,
     kwargs: Mapping[str, float],
@@ -192,6 +195,7 @@ class TaylorEmulator:
     cache_key: str | None = None
     finite_difference_accuracy: int = 2
     metadata: Mapping[str, Any] | None = None
+    valid_param_names: list[str] | tuple[str, ...] | None = None
     _step_sizes: dict[str, float] = field(init=False, repr=False)
     _powers: np.ndarray = field(init=False, repr=False)
     _stencils: dict[int, tuple[np.ndarray, np.ndarray]] = field(init=False, repr=False)
@@ -200,6 +204,8 @@ class TaylorEmulator:
     _output_adapter: _OutputAdapter | None = field(init=False, default=None, repr=False)
     _eval_cache: dict[tuple[int, ...], np.ndarray] = field(init=False, default_factory=dict, repr=False)
     _cache_path: Path | None = field(init=False, default=None, repr=False)
+    _valid_param_names: tuple[str, ...] = field(init=False, repr=False)
+    _constrained_param_names: tuple[str, ...] = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.fiducial = {str(name): float(value) for name, value in dict(self.fiducial).items()}
@@ -225,6 +231,21 @@ class TaylorEmulator:
             raise ValueError(f"TaylorEmulator.param_names are missing from fiducial: {', '.join(missing)}.")
         if len(set(self.param_names)) != len(self.param_names):
             raise ValueError("TaylorEmulator.param_names must be unique.")
+
+        if self.valid_param_names is None:
+            self._valid_param_names = tuple(self.fiducial)
+        else:
+            self._valid_param_names = tuple(str(name) for name in self.valid_param_names)
+        if len(set(self._valid_param_names)) != len(self._valid_param_names):
+            raise ValueError("TaylorEmulator.valid_param_names must be unique.")
+
+        missing_valid = [name for name in self._valid_param_names if name not in self.fiducial]
+        if missing_valid:
+            raise ValueError(f"TaylorEmulator.valid_param_names are missing from fiducial: {', '.join(missing_valid)}.")
+        unknown_emulated = [name for name in self.param_names if name not in self._valid_param_names]
+        if unknown_emulated:
+            raise ValueError(f"TaylorEmulator.param_names must be a subset of valid_param_names. Invalid: {', '.join(unknown_emulated)}.")
+        self._constrained_param_names = tuple(name for name in self._valid_param_names if name not in set(self.param_names))
 
         self._step_sizes = self._resolve_step_sizes(self.step_sizes)
         self._powers = _enumerate_multi_indices(len(self.param_names), self.order)
@@ -280,6 +301,8 @@ class TaylorEmulator:
             "param_names": list(self.param_names),
             "fiducial": {name: self.fiducial[name] for name in self.param_names},
             "step_sizes": {name: self._step_sizes[name] for name in self.param_names},
+            "valid_param_names": list(self._valid_param_names),
+            "constrained_fiducial": {name: self.fiducial[name] for name in self._constrained_param_names},
             "adapter_tag": None if self._output_adapter is None else self._output_adapter.tag,
             "metadata": dict(self.metadata),
         }
@@ -346,7 +369,7 @@ class TaylorEmulator:
             derivative = derivative + weight * self._evaluate_theory(offset)
         return derivative
 
-    def build(self, force: bool = False) -> TaylorEmulator:
+    def build(self, force: bool = False, progress_callback: ProgressCallback | None = None) -> TaylorEmulator:
         self._cache_path = self._resolve_cache_path()
         if not force and self._cache_path is not None and self._cache_path.exists():
             loaded = self.load(self._cache_path, theory_fn=self.theory_fn, output_adapter=self.output_adapter)
@@ -354,6 +377,8 @@ class TaylorEmulator:
             self._output_state = loaded._output_state
             self._output_adapter = loaded._output_adapter
             self._cache_path = loaded._cache_path
+            self._valid_param_names = loaded._valid_param_names
+            self._constrained_param_names = loaded._constrained_param_names
             return self
 
         self._eval_cache = {}
@@ -363,6 +388,8 @@ class TaylorEmulator:
         for index, powers in enumerate(self._powers):
             derivative = self._compute_derivative(powers)
             self._coefficients[index] = derivative / _factorial_product(powers)
+            if progress_callback is not None:
+                progress_callback(index + 1, self.n_terms)
 
         if self._cache_path is not None:
             self.save(self._cache_path)
@@ -372,9 +399,19 @@ class TaylorEmulator:
         if not self.is_built or self._coefficients is None or self._output_state is None or self._output_adapter is None:
             raise ValueError("TaylorEmulator must be built or loaded before predict().")
 
-        unknown = sorted(set(params) - set(self.fiducial))
+        unknown = sorted(set(params) - set(self._valid_param_names))
         if unknown:
             raise ValueError(f"Unexpected emulator parameters: {', '.join(unknown)}.")
+        varied_constrained = [
+            name
+            for name in self._constrained_param_names
+            if name in params and not np.isclose(float(params[name]), float(self.fiducial[name]), rtol=0.0, atol=0.0)
+        ]
+        if varied_constrained:
+            raise ValueError(
+                "Parameters were provided that are valid for the theory but were not emulated: "
+                + ", ".join(varied_constrained)
+            )
 
         deltas = np.asarray([float(params.get(name, self.fiducial[name])) - self.fiducial[name] for name in self.param_names], dtype=float)
         monomials = np.prod(np.power(deltas[None, :], self._powers, dtype=float), axis=1)
@@ -426,9 +463,12 @@ class TaylorEmulator:
             if adapter is None:
                 raise ValueError(f"Unknown TaylorEmulator output adapter '{adapter_tag}'. Pass output_adapter explicitly when loading.")
 
+            fiducial = dict(zip(data["param_names"].tolist(), data["fiducial_values"].tolist(), strict=True))
+            fiducial.update({str(name): float(value) for name, value in config.get("constrained_fiducial", {}).items()})
+
             emulator = cls(
                 theory_fn=theory_fn,
-                fiducial=dict(zip(data["param_names"].tolist(), data["fiducial_values"].tolist(), strict=True)),
+                fiducial=fiducial,
                 order=int(config["order"]),
                 step_sizes=dict(zip(data["param_names"].tolist(), data["step_sizes"].tolist(), strict=True)),
                 param_names=data["param_names"].tolist(),
@@ -437,6 +477,11 @@ class TaylorEmulator:
                 cache_key=source.stem.removeprefix("taylor_"),
                 finite_difference_accuracy=int(config["finite_difference_accuracy"]),
                 metadata=config.get("metadata", {}),
+                valid_param_names=config.get("valid_param_names"),
+            )
+            emulator._valid_param_names = tuple(str(name) for name in config.get("valid_param_names", data["param_names"].tolist()))
+            emulator._constrained_param_names = tuple(
+                name for name in emulator._valid_param_names if name not in set(emulator.param_names)
             )
             emulator._powers = np.asarray(data["powers"], dtype=int)
             emulator._coefficients = np.asarray(data["coefficients"], dtype=float)

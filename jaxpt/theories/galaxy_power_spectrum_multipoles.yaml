@@ -10,11 +10,15 @@ parameters:
     value: -0.1
   cs0:
     value: 0.0
+    marginalized: true
   cs2:
     value: 30.0
+    marginalized: true
   cs4:
     value: 0.0
+    marginalized: true
   Pshot:
     value: 3000.0
+    marginalized: true
   b4:
     value: 10.0
