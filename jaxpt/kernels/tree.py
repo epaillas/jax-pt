@@ -46,6 +46,16 @@ def _interpolate_on_logk(source_k: jnp.ndarray, values: jnp.ndarray, output_k: j
 
 
 def compute_real_tree_matter(linear_input: LinearPowerInput, output_k: jnp.ndarray | None = None) -> jnp.ndarray:
+    """Return the linear real-space matter spectrum on the requested grid.
+
+    Parameters
+    ----------
+    linear_input
+        Linear-theory input sampled on its support grid.
+    output_k
+        Optional output grid in ``1/Mpc``. If omitted, return the stored
+        support-grid values directly.
+    """
     source_k = jnp.asarray(linear_input.k)
     values = jnp.asarray(linear_input.pk_linear)
     if output_k is None:
@@ -54,5 +64,6 @@ def compute_real_tree_matter(linear_input: LinearPowerInput, output_k: jnp.ndarr
 
 
 def compute_counterterm_shape(linear_input: LinearPowerInput, output_k: jnp.ndarray | None = None) -> jnp.ndarray:
+    """Return the standard real-space counterterm shape ``-k^2 P_lin(k)``."""
     k = jnp.asarray(linear_input.k) if output_k is None else output_k
     return -(k**2) * compute_real_tree_matter(linear_input, output_k=output_k)

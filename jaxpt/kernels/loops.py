@@ -60,6 +60,21 @@ def compute_real_loop_terms(
     output_k: jnp.ndarray | None = None,
     fftlog_input: FFTLogInput | None = None,
 ) -> dict[str, jnp.ndarray]:
+    """Compute or stub out the real-space one-loop basis terms.
+
+    Parameters
+    ----------
+    linear_input
+        Linear-theory input sampled on a support grid.
+    settings
+        `PTSettings` with ``loop_order`` equal to ``"tree"`` or
+        ``"one_loop"``.
+    output_k
+        Optional output grid in ``1/Mpc``.
+    fftlog_input
+        Optional preprocessed FFTLog input. Supplying this avoids repeated
+        interpolation onto the internal FFTLog grid.
+    """
     k = jnp.asarray(linear_input.k) if output_k is None else output_k
     if settings.loop_order == "tree":
         return _zero_real_loop_terms(k)
@@ -81,6 +96,10 @@ def compute_rsd_loop_terms(
     output_k: jnp.ndarray | None = None,
     fftlog_input: FFTLogInput | None = None,
 ) -> dict[str, jnp.ndarray]:
+    """Compute or stub out the one-loop RSD basis terms.
+
+    Parameters are the same as for `compute_real_loop_terms`.
+    """
     if settings.loop_order == "tree":
         k = jnp.asarray(linear_input.k) if output_k is None else output_k
         return _zero_rsd_loop_terms(k)

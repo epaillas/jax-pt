@@ -207,6 +207,22 @@ def compute_fftlog_realspace_terms_from_arrays(
     h: float,
     settings: PTSettings,
 ) -> dict[str, jnp.ndarray]:
+    """Compute analytic FFTLog real-space loop terms from raw arrays.
+
+    Parameters
+    ----------
+    support_k
+        Input support grid in ``1/Mpc``.
+    pk_linear
+        Linear power spectrum on ``support_k``.
+    output_k
+        Output grid in ``1/Mpc`` where the loop terms should be returned.
+    h
+        Reduced Hubble parameter.
+    settings
+        `PTSettings` describing the FFTLog discretization. The current code
+        requires ``kernel_source="analytic"``.
+    """
     if settings.kernel_source != "analytic":
         raise NotImplementedError("FFTLog real-space loops only support kernel_source='analytic'.")
 
@@ -285,6 +301,19 @@ def compute_fftlog_realspace_terms_from_preprocessed(
     settings: PTSettings,
     output_k: jnp.ndarray | None = None,
 ) -> dict[str, jnp.ndarray]:
+    """Compute analytic FFTLog real-space loop terms from `FFTLogInput`.
+
+    Parameters
+    ----------
+    fftlog_input
+        Linear spectra already aligned to the internal FFTLog support grid.
+    settings
+        `PTSettings` describing the FFTLog discretization. The current code
+        requires ``kernel_source="analytic"``.
+    output_k
+        Optional output grid in ``1/Mpc``. If omitted, the terms are returned
+        on the FFTLog support grid.
+    """
     if settings.kernel_source != "analytic":
         raise NotImplementedError("FFTLog real-space loops only support kernel_source='analytic'.")
 
@@ -354,6 +383,19 @@ def compute_fftlog_realspace_terms(
     settings: PTSettings,
     output_k: jnp.ndarray | None = None,
 ) -> dict[str, jnp.ndarray]:
+    """Compute analytic FFTLog real-space loop terms from `LinearPowerInput`.
+
+    Parameters
+    ----------
+    linear_input
+        Linear-theory input sampled on an arbitrary support grid.
+    settings
+        `PTSettings` describing the FFTLog discretization. The current code
+        requires ``kernel_source="analytic"``.
+    output_k
+        Optional output grid in ``1/Mpc``. If omitted, the original support
+        grid from ``linear_input`` is used.
+    """
     fftlog_input = prepare_fftlog_input(linear_input, settings)
     if output_k is None:
         output_k = jnp.asarray(np.asarray(linear_input.k, dtype=float))

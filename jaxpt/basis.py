@@ -12,6 +12,7 @@ from .reference.classpt import BASIS_COMPONENT_NAMES, BasisSpectra
 
 
 def empty_components(k: jnp.ndarray) -> dict[str, jnp.ndarray]:
+    """Return a zero-filled component dictionary on the supplied grid."""
     zeros = jnp.zeros_like(k)
     return {name: zeros for name in BASIS_COMPONENT_NAMES}
 
@@ -25,6 +26,25 @@ def make_basis(
     components: dict[str, jnp.ndarray],
     metadata: dict[str, Any] | None = None,
 ) -> BasisSpectra:
+    """Build a `BasisSpectra` object from partial component data.
+
+    Parameters
+    ----------
+    k
+        One-dimensional evaluation grid in ``1/Mpc``.
+    z
+        Redshift of the basis.
+    h
+        Reduced Hubble parameter used for unit conversions.
+    growth_rate
+        Linear growth rate ``f(z)`` used by the RSD assembly formulas.
+    components
+        Partial mapping of basis-component arrays. Missing components are
+        filled with zeros so the returned `BasisSpectra` always exposes the
+        full CLASS-PT-style component contract.
+    metadata
+        Optional provenance metadata attached to the basis.
+    """
     payload = empty_components(k)
     payload.update(components)
     return BasisSpectra(
@@ -93,7 +113,25 @@ def build_realspace_predictor(
     settings: PTSettings | None = None,
     k: np.ndarray | None = None,
 ):
-    """Build a compiled real-space galaxy-spectrum predictor."""
+    """Build a JIT-compiled real-space galaxy-spectrum predictor.
+
+    Parameters
+    ----------
+    linear_input
+        Linear-theory input sampled on a support grid.
+    settings
+        `PTSettings` for the `jaxpt` backend. Supported values are
+        ``backend="jaxpt"`` and ``loop_order`` in ``{"tree", "one_loop"}``.
+    k
+        Optional output grid in ``1/Mpc``. If omitted, the predictor evaluates
+        on the support grid stored in ``linear_input``.
+
+    Returns
+    -------
+    Callable
+        JIT-compiled function with signature
+        ``(b1, b2, bG2, bGamma3, cs, cs0, Pshot) -> Pgg(k)``.
+    """
     if settings is None:
         settings = PTSettings(ir_resummation=False)
 

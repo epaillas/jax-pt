@@ -185,6 +185,41 @@ def _resolve_output_adapter(output_adapter: _OutputAdapter | None, sample_output
 
 @dataclass(slots=True)
 class TaylorEmulator:
+    """Multivariate Taylor emulator around a fiducial theory point.
+
+    Parameters
+    ----------
+    theory_fn
+        Callable that accepts a flat parameter mapping and returns either a
+        NumPy-like array or a `MultipolePrediction`.
+    fiducial
+        Full fiducial parameter mapping used as the expansion point.
+    order
+        Maximum total Taylor order. Must be a non-negative integer.
+    step_sizes
+        Either a scalar relative step scale or an explicit mapping from each
+        emulated parameter name to its finite-difference step size.
+    param_names
+        Ordered subset of parameters to emulate. If omitted, the emulator uses
+        the theory's default emulated subset when available.
+    output_adapter
+        Optional custom adapter for flattening and reconstructing theory
+        outputs.
+    cache_dir
+        Optional directory where hashed emulator files should be written.
+    cache_key
+        Optional explicit hash key. If omitted, a deterministic key is derived
+        from the emulator configuration.
+    finite_difference_accuracy
+        Central-stencil accuracy order used for derivative estimates. Must be a
+        positive integer.
+    metadata
+        Free-form build metadata persisted in the serialized emulator.
+    valid_param_names
+        Full set of valid theory parameters. Parameters outside this set are
+        rejected at evaluation time.
+    """
+
     theory_fn: Callable[[Mapping[str, float]], Any] | None = None
     fiducial: Mapping[str, float] = field(default_factory=dict)
     order: int = 4
@@ -279,18 +314,22 @@ class TaylorEmulator:
 
     @property
     def is_built(self) -> bool:
+        """Whether the emulator coefficients and output metadata are available."""
         return self._coefficients is not None and self._output_state is not None and self._output_adapter is not None
 
     @property
     def n_terms(self) -> int:
+        """Number of Taylor monomials included in the expansion."""
         return int(self._powers.shape[0])
 
     @property
     def n_evals(self) -> int:
+        """Number of unique theory evaluations cached during the current build."""
         return len(self._eval_cache)
 
     @property
     def cache_path(self) -> Path | None:
+        """Resolved path to the serialized emulator, if caching is enabled."""
         return self._cache_path
 
     def _config_payload(self) -> dict[str, Any]:
@@ -370,6 +409,17 @@ class TaylorEmulator:
         return derivative
 
     def build(self, force: bool = False, progress_callback: ProgressCallback | None = None) -> TaylorEmulator:
+        """Build the emulator coefficients, optionally reusing a cached file.
+
+        Parameters
+        ----------
+        force
+            If ``True``, rebuild even when a matching hashed file already
+            exists on disk.
+        progress_callback
+            Optional callable receiving ``(completed_terms, total_terms)``
+            after each Taylor term has been constructed.
+        """
         self._cache_path = self._resolve_cache_path()
         if not force and self._cache_path is not None and self._cache_path.exists():
             loaded = self.load(self._cache_path, theory_fn=self.theory_fn, output_adapter=self.output_adapter)
@@ -418,6 +468,23 @@ class TaylorEmulator:
         return monomials @ self._coefficients
 
     def predict(self, parameters: Mapping[str, float] | None = None, **kwargs: float) -> Any:
+        """Evaluate the emulator for a flat parameter query.
+
+        Parameters
+        ----------
+        parameters
+            Optional mapping of query values. Names may include any parameter in
+            ``valid_param_names``.
+        **kwargs
+            Keyword-argument form of ``parameters``. This is merged with the
+            mapping and must not repeat names.
+
+        Notes
+        -----
+        Parameters that are valid for the underlying theory but were not
+        emulated must remain at their fiducial values. Varying them raises
+        ``ValueError``.
+        """
         query = _normalize_query(parameters, kwargs)
         vector = self._predict_vector(query)
         assert self._output_adapter is not None
@@ -441,6 +508,7 @@ class TaylorEmulator:
         }
 
     def save(self, path: str | Path) -> Path:
+        """Serialize the built emulator to ``.npz`` format."""
         destination = Path(path)
         destination.parent.mkdir(parents=True, exist_ok=True)
         np.savez(destination, **self._serialized_state())
@@ -455,6 +523,20 @@ class TaylorEmulator:
         theory_fn: Callable[[Mapping[str, float]], Any] | None = None,
         output_adapter: _OutputAdapter | None = None,
     ) -> TaylorEmulator:
+        """Load a serialized emulator from disk.
+
+        Parameters
+        ----------
+        path
+            Path to a file written by `TaylorEmulator.save`.
+        theory_fn
+            Optional theory callable attached to the loaded emulator. This is
+            not required for prediction, but it is useful if the loaded
+            instance will be rebuilt.
+        output_adapter
+            Optional output adapter used when the serialized adapter tag is not
+            one of the built-in adapters.
+        """
         source = Path(path)
         with np.load(source, allow_pickle=False) as data:
             config = json.loads(str(data["config_json"]))

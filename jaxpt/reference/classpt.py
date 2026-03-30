@@ -10,6 +10,26 @@ import numpy as np
 
 @dataclass(frozen=True, slots=True)
 class BasisSpectra:
+    """Named basis terms evaluated on a common wavenumber grid.
+
+    Parameters
+    ----------
+    k
+        One-dimensional evaluation grid in ``1/Mpc``.
+    z
+        Redshift of the prediction.
+    h
+        Reduced Hubble parameter used for unit conversions.
+    growth_rate
+        Linear growth rate ``f(z)`` used by the RSD assembly formulas.
+    components
+        Mapping from descriptive basis-term names, such as
+        ``"real_tree_matter"`` or ``"rsd_l2_loop_00"``, to arrays sampled on
+        ``k``.
+    metadata
+        Free-form provenance metadata.
+    """
+
     k: jnp.ndarray
     z: float
     h: float
@@ -20,6 +40,20 @@ class BasisSpectra:
 
 @dataclass(frozen=True, slots=True)
 class MultipolePrediction:
+    """Container for galaxy power-spectrum multipoles.
+
+    Parameters
+    ----------
+    k
+        One-dimensional evaluation grid in ``1/Mpc``.
+    p0, p2, p4
+        Monopole, quadrupole, and hexadecapole arrays on ``k``.
+    components
+        Optional decomposition returned by selected `jaxpt` theory paths.
+    metadata
+        Free-form provenance metadata, usually including backend and redshift.
+    """
+
     k: jnp.ndarray
     p0: jnp.ndarray
     p2: jnp.ndarray
@@ -82,6 +116,23 @@ def predict_classpt_multipoles(
     *,
     metadata: dict[str, Any] | None = None,
 ) -> MultipolePrediction:
+    """Evaluate CLASS-PT multipoles from a live `classy.Class` PT cosmology.
+
+    Parameters
+    ----------
+    cosmo
+        Live `classy.Class` instance configured with CLASS-PT enabled.
+    k
+        One-dimensional evaluation grid in ``1/Mpc``.
+    z
+        Redshift at which the multipoles are evaluated.
+    params
+        Nuisance-parameter mapping. Required names are ``b1``, ``b2``,
+        ``bG2``, ``bGamma3``, ``cs0``, ``cs2``, ``cs4``, ``Pshot``, and
+        ``b4``.
+    metadata
+        Optional metadata merged into the returned prediction.
+    """
     eval_k = np.asarray(k, dtype=float)
     cosmo.initialize_output(eval_k, float(z), len(eval_k))
 

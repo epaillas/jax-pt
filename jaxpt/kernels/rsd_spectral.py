@@ -127,6 +127,22 @@ def compute_fftlog_rsd_terms(
     output_k: jnp.ndarray | None = None,
     fftlog_input: FFTLogInput | None = None,
 ) -> dict[str, jnp.ndarray]:
+    """Compute analytic FFTLog one-loop RSD basis terms.
+
+    Parameters
+    ----------
+    linear_input
+        Linear-theory input sampled on a support grid.
+    settings
+        `PTSettings` describing the FFTLog discretization. The current code
+        requires ``kernel_source="analytic"``.
+    output_k
+        Optional output grid in ``1/Mpc``. If omitted, the original support
+        grid from ``linear_input`` is used.
+    fftlog_input
+        Optional preprocessed `FFTLogInput`. Supplying this avoids repeated
+        interpolation onto the internal FFTLog grid.
+    """
     if settings.kernel_source != "analytic":
         raise NotImplementedError("FFTLog one-loop RSD kernels only support kernel_source='analytic'.")
 

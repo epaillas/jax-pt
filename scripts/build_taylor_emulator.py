@@ -34,6 +34,7 @@ def _parse_assignment(text: str) -> tuple[str, float]:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser for the multipole Taylor-emulator training script."""
     parser = argparse.ArgumentParser(description="Build a hashed Taylor emulator for jaxpt power-spectrum multipoles.")
     parser.add_argument("--z", type=float, default=0.5, help="Redshift at which to build the emulator.")
     parser.add_argument("--kmin", type=float, default=0.01, help="Minimum evaluation k in 1/Mpc.")
@@ -103,6 +104,13 @@ def _format_param_values(theory: GalaxyPowerSpectrumMultipolesTheory, names: lis
 
 
 def main() -> None:
+    """Train or load a hashed multipole Taylor emulator from CLI arguments.
+
+    The script starts from the packaged cosmology and nuisance defaults,
+    applies the example cosmology fix-up that leaves only ``A_s`` and
+    ``omega_cdm`` free unless the user narrows the parameter set further, and
+    writes the resulting emulator to ``taylor_<hash>.npz``.
+    """
     args = build_parser().parse_args()
 
     cosmology_defaults = load_power_spectrum_template_parameters().defaults_dict()

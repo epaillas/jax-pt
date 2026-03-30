@@ -8,6 +8,27 @@ from typing import Any
 
 @dataclass(slots=True)
 class Parameter:
+    """Single scalar theory parameter with emulation and prior metadata.
+
+    Parameters
+    ----------
+    name
+        Parameter name used in flat theory and emulator queries, for example
+        ``"omega_cdm"`` or ``"b1"``.
+    value
+        Fiducial/default value.
+    fixed
+        If ``True``, the parameter is treated as fixed and is excluded from
+        default emulator parameter sets.
+    marginalized
+        If ``True``, the parameter is considered analytically marginalized and
+        is also excluded from default emulator parameter sets.
+    prior
+        Optional prior description copied verbatim from YAML or user input.
+    metadata
+        Free-form metadata that accompanies the parameter definition.
+    """
+
     name: str
     value: float
     fixed: bool = False
@@ -25,13 +46,21 @@ class Parameter:
 
     @property
     def varied(self) -> bool:
+        """Whether the parameter is not fixed."""
         return not self.fixed
 
     @property
     def emulated(self) -> bool:
+        """Whether the parameter should enter default emulator expansions."""
         return (not self.fixed) and (not self.marginalized)
 
     def update(self, **kwargs: Any) -> Parameter:
+        """Update the parameter in place and return `self`.
+
+        Recognized keyword arguments are ``name``, ``value``, ``fixed``,
+        ``marginalized``, ``prior``, and ``metadata``. Any other keyword is
+        stored inside ``metadata`` under the provided name.
+        """
         for name, value in kwargs.items():
             if name == "name":
                 self.name = str(value)
@@ -50,6 +79,7 @@ class Parameter:
         return self
 
     def copy(self) -> Parameter:
+        """Return a detached copy of the parameter."""
         return Parameter(
             name=self.name,
             value=self.value,
@@ -61,6 +91,19 @@ class Parameter:
 
 
 class ParameterCollection:
+    """Ordered collection of named `Parameter` objects.
+
+    Parameters
+    ----------
+    parameters
+        Optional source used to populate the collection. Accepted forms are:
+
+        - ``None`` for an empty collection;
+        - a mapping from parameter names to `Parameter` instances, scalar
+          values, or mapping payloads containing at least ``value``;
+        - an iterable of `Parameter` instances or ``(name, payload)`` pairs.
+    """
+
     def __init__(self, parameters: Mapping[str, Any] | Iterable[Any] | None = None) -> None:
         self._parameters: OrderedDict[str, Parameter] = OrderedDict()
         if parameters is None:
@@ -96,6 +139,7 @@ class ParameterCollection:
 
     @classmethod
     def combine(cls, *collections: ParameterCollection) -> ParameterCollection:
+        """Merge multiple collections, with later entries overriding earlier ones."""
         merged = cls()
         for collection in collections:
             for parameter in collection:
@@ -103,42 +147,60 @@ class ParameterCollection:
         return merged
 
     def copy(self, *, shared: bool = False) -> ParameterCollection:
+        """Copy the collection.
+
+        Parameters
+        ----------
+        shared
+            If ``True``, reuse the same `Parameter` objects. If ``False``,
+            clone each parameter.
+        """
         copied = self.__class__()
         for parameter in self:
             copied.set(parameter if shared else parameter.copy())
         return copied
 
     def set(self, parameter: Parameter) -> None:
+        """Insert or replace a parameter by name."""
         self._parameters[str(parameter.name)] = parameter
 
     def update(self, parameters: Mapping[str, Any] | Iterable[Any] | ParameterCollection) -> ParameterCollection:
+        """Merge another parameter source into the collection."""
         other = parameters if isinstance(parameters, ParameterCollection) else ParameterCollection(parameters)
         for parameter in other:
             self.set(parameter)
         return self
 
     def defaults_dict(self) -> dict[str, float]:
+        """Return the current parameter values as a plain mapping."""
         return {name: parameter.value for name, parameter in self._parameters.items()}
 
     def names(self) -> tuple[str, ...]:
+        """Return parameter names in insertion order."""
         return tuple(self._parameters)
 
     def values(self) -> tuple[Parameter, ...]:
+        """Return parameters in insertion order."""
         return tuple(self._parameters.values())
 
     def items(self) -> tuple[tuple[str, Parameter], ...]:
+        """Return ``(name, parameter)`` pairs in insertion order."""
         return tuple(self._parameters.items())
 
     def fixed_names(self) -> tuple[str, ...]:
+        """Return the names of parameters marked fixed."""
         return tuple(name for name, parameter in self._parameters.items() if parameter.fixed)
 
     def varied_names(self) -> tuple[str, ...]:
+        """Return the names of parameters that are not fixed."""
         return tuple(name for name, parameter in self._parameters.items() if parameter.varied)
 
     def marginalized_names(self) -> tuple[str, ...]:
+        """Return the names of parameters flagged for marginalization."""
         return tuple(name for name, parameter in self._parameters.items() if parameter.marginalized)
 
     def emulated_names(self) -> tuple[str, ...]:
+        """Return the default parameter subset for emulator expansion."""
         return tuple(name for name, parameter in self._parameters.items() if parameter.emulated)
 
     def __getitem__(self, name: str) -> Parameter:

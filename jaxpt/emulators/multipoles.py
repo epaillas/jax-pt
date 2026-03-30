@@ -24,6 +24,36 @@ def build_multipole_emulator(
     progress_callback=None,
     force: bool = False,
 ) -> TaylorEmulator:
+    """Build a Taylor emulator for galaxy power-spectrum multipoles.
+
+    Parameters
+    ----------
+    theory
+        `GalaxyPowerSpectrumMultipolesTheory` instance to emulate. The template
+        backend must be ``"jaxpt"``.
+    order
+        Maximum total Taylor order.
+    step_sizes
+        Either a scalar relative step scale or an explicit per-parameter
+        mapping.
+    param_names
+        Optional explicit parameter subset to emulate. If omitted, the theory's
+        non-fixed, non-marginalized parameters are used.
+    cache_dir
+        Optional directory where hashed emulator files should be written.
+    cache_key
+        Optional explicit cache key. If omitted, a deterministic hash is built
+        from the emulator configuration and theory metadata.
+    finite_difference_accuracy
+        Central-stencil accuracy order used for derivative estimates.
+    metadata
+        Optional extra metadata merged into the build record.
+    progress_callback
+        Optional callback receiving ``(completed_terms, total_terms)`` during
+        training.
+    force
+        If ``True``, rebuild even if a matching hashed file already exists.
+    """
     if theory.template.settings.backend != "jaxpt":
         raise ValueError("build_multipole_emulator requires a jaxpt GalaxyPowerSpectrumMultipolesTheory.")
 

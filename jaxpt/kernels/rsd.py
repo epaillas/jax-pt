@@ -4,6 +4,7 @@ import jax.numpy as jnp
 
 
 def compute_linear_rsd_terms(real_tree_matter: jnp.ndarray, growth_rate: float) -> dict[str, jnp.ndarray]:
+    """Build the tree-level RSD multipole basis terms from `P_lin(k)`."""
     f = float(growth_rate)
     return {
         "rsd_l0_mm_00": (f**2 / 5.0) * real_tree_matter,
@@ -17,6 +18,7 @@ def compute_linear_rsd_terms(real_tree_matter: jnp.ndarray, growth_rate: float) 
 
 
 def compute_counterterm_multipoles(real_counterterm_shape: jnp.ndarray, growth_rate: float) -> dict[str, jnp.ndarray]:
+    """Build the linear counterterm multipole shapes used in the assembly layer."""
     f = float(growth_rate)
     return {
         "rsd_l0_counterterm_shape": real_counterterm_shape,

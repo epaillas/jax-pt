@@ -16,6 +16,16 @@ def _p(params: Mapping[str, float], name: str) -> float:
 
 
 def matter_real_spectrum(basis: BasisSpectra, cs: float) -> jnp.ndarray:
+    """Assemble the real-space matter power spectrum from named basis terms.
+
+    Parameters
+    ----------
+    basis
+        Basis container with ``real_tree_matter``, ``real_loop_matter``, and
+        ``real_counterterm_shape`` components.
+    cs
+        EFT counterterm coefficient multiplying the matter counterterm shape.
+    """
     h = basis.h
     return (_c(basis, "real_tree_matter") + _c(basis, "real_loop_matter") + 2.0 * cs * _c(basis, "real_counterterm_shape") / h**2) * h**3
 
@@ -30,6 +40,21 @@ def galaxy_real_spectrum(
     cs0: float,
     Pshot: float,
 ) -> jnp.ndarray:
+    """Assemble the real-space galaxy power spectrum from a basis and biases.
+
+    Parameters
+    ----------
+    basis
+        Basis container containing the named real-space matter and bias terms.
+    b1, b2, bG2, bGamma3
+        Eulerian bias parameters.
+    cs
+        Matter-like counterterm coefficient.
+    cs0
+        Galaxy counterterm coefficient for the real-space monopole-like shape.
+    Pshot
+        Constant shot-noise contribution added after the physical terms.
+    """
     h = basis.h
     return (
         b1**2 * _c(basis, "real_loop_matter")
@@ -49,6 +74,21 @@ def galaxy_multipoles(
     params: Mapping[str, float],
     return_components: bool = False,
 ) -> MultipolePrediction:
+    """Assemble `P0`, `P2`, and `P4` from a basis and nuisance parameters.
+
+    Parameters
+    ----------
+    basis
+        Basis container with the named real-space, RSD, and counterterm
+        components expected by the CLASS-PT-style assembly formulas.
+    params
+        Flat nuisance-parameter mapping. Required names are ``b1``, ``b2``,
+        ``bG2``, ``bGamma3``, ``cs0``, ``cs2``, ``cs4``, ``Pshot``, and
+        ``b4``.
+    return_components
+        If ``True``, include a compact decomposition of each multipole into its
+        core and ``b4`` contributions.
+    """
     h = basis.h
     f = basis.growth_rate
     b1 = _p(params, "b1")

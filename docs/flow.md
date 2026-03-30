@@ -1,6 +1,8 @@
 # Prediction Flow
 
-This page documents the current execution flow for `jaxpt` power-spectrum prediction calls.
+This page documents the current execution flow for `jaxpt` power-spectrum
+prediction calls and the Taylor-emulator build path that sits on top of the
+theory layer.
 
 The canonical entrypoint is now the theory layer in `jaxpt.theories`, typically
 `GalaxyPowerSpectrumMultipolesTheory(...)` or
@@ -51,6 +53,31 @@ flowchart TD
 ```
 
 Tree-level and one-loop predictions share the same basis-construction pipeline, with `settings.loop_order` switching the loop stages between zeros and the analytic FFTLog one-loop terms.
+
+## Emulator Flow
+
+The multipole-emulator entrypoint is the training script
+[`scripts/build_taylor_emulator.py`](/Users/epaillas/code/jax-pt/scripts/build_taylor_emulator.py)
+or the lower-level helper `build_multipole_emulator(...)`.
+
+```mermaid
+flowchart TD
+    A["build_taylor_emulator.py"] --> B["PowerSpectrumTemplate(...)"]
+    B --> C["GalaxyPowerSpectrumMultipolesTheory(...)"]
+    C --> D["build_multipole_emulator(theory, ...)"]
+    D --> E["TaylorEmulator(...)"]
+    E --> F{"hashed file exists?"}
+    F -->|"yes"| G["load taylor_<hash>.npz"]
+    F -->|"no"| H["finite-difference theory evaluations"]
+    H --> I["progress callback / CLI progress bar"]
+    I --> J["save taylor_<hash>.npz"]
+    G --> K["predict(parameters)"]
+    J --> K["predict(parameters)"]
+```
+
+During evaluation, the emulator accepts any valid theory parameter name but
+raises if a valid non-emulated parameter is varied away from its fiducial
+value.
 
 ## Jaxpt Real-Space Flow
 

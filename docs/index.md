@@ -1,13 +1,16 @@
 # jaxpt
 
-`jaxpt` is structured around explicit basis containers and pure assembly functions.
+`jaxpt` is structured around explicit basis containers, high-level theory
+objects, and pure assembly functions.
 
 Current public workflow:
 
-1. Build a `CLASS-PT` cosmology with the local `classy` installation.
-2. Convert linear theory to `LinearPowerInput` with `build_linear_input_from_classy`.
-3. Build basis spectra with `compute_basis`.
-4. Assemble `P_0`, `P_2`, and `P_4` with `galaxy_multipoles`.
+1. Build a `PowerSpectrumTemplate` from a live cosmology object, a fiducial
+   cosmology mapping, or a precomputed `LinearPowerInput`.
+2. Wrap it in `GalaxyPowerSpectrumMultipolesTheory(...)`.
+3. Evaluate the theory with a flat nuisance/cosmology query.
+4. Optionally build a hashed Taylor emulator with
+   `scripts/build_taylor_emulator.py` or `build_multipole_emulator(...)`.
 
 Current backends:
 
@@ -16,8 +19,8 @@ Current backends:
 
 The one-loop basis now fills both real-space and RSD loop components behind the same `BasisSpectra` contract.
 
-The current execution flow for prediction calls is documented in
-[docs/flow.md](/Users/epaillas/code/jax-pt/docs/flow.md).
+The current execution flow for prediction and emulator-building calls is
+documented in [docs/flow.md](/Users/epaillas/code/jax-pt/docs/flow.md).
 
 The current `jaxpt`/reference plotting example is:
 

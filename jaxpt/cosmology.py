@@ -10,6 +10,33 @@ from .config import PTSettings
 
 @dataclass(frozen=True, slots=True)
 class LinearPowerInput:
+    """Linear-theory input sampled on a single support grid.
+
+    Parameters
+    ----------
+    k
+        One-dimensional support grid in ``1/Mpc``.
+    pk_linear
+        Linear power spectrum on ``k``, typically in ``Mpc^3``.
+    z
+        Redshift at which the input is defined.
+    growth_factor
+        Linear growth factor at ``z``.
+    growth_rate
+        Linear growth rate ``f(z)``.
+    h
+        Reduced Hubble parameter.
+    transfer_linear
+        Optional linear transfer-like quantity on the same grid. In CLASS-backed
+        parity workflows this stores the transfer used by the RSD FFTLog terms.
+    pk_nowiggle
+        Optional smooth linear spectrum on the same grid for future
+        IR-resummation support.
+    metadata
+        Free-form provenance metadata. Common entries include ``source``,
+        ``field``, ``k_units``, and ``pk_units``.
+    """
+
     k: np.ndarray
     pk_linear: np.ndarray
     z: float
@@ -66,6 +93,32 @@ class LinearPowerInput:
 
 @dataclass(frozen=True, slots=True)
 class FFTLogInput:
+    """Linear input resampled to the internal FFTLog support grid.
+
+    Parameters
+    ----------
+    kdisc
+        Internal FFTLog support grid in ``1/Mpc``.
+    pdisc
+        Linear power spectrum sampled on ``kdisc``.
+    tdisc
+        Transfer-like quantity sampled on ``kdisc``.
+    z
+        Redshift at which the spectra are defined.
+    growth_factor
+        Linear growth factor at ``z``.
+    growth_rate
+        Linear growth rate ``f(z)``.
+    h
+        Reduced Hubble parameter.
+    pnw, tnw
+        Optional nowiggle power and transfer spectra on ``kdisc``.
+    pw, tw
+        Optional wiggle residuals, usually ``pdisc - pnw`` and ``tdisc - tnw``.
+    metadata
+        Free-form provenance metadata for the preprocessing step.
+    """
+
     kdisc: np.ndarray
     pdisc: np.ndarray
     tdisc: np.ndarray
@@ -159,7 +212,17 @@ def _build_linear_input_from_classy(
 
 
 def build_linear_input_from_classy(cosmo: Any, z: float, k: np.ndarray) -> LinearPowerInput:
-    """Build a linear-input container from a `classy.Class` instance."""
+    """Build `LinearPowerInput` from a live `classy.Class` cosmology.
+
+    Parameters
+    ----------
+    cosmo
+        Live `classy.Class` instance with a computed linear spectrum.
+    z
+        Redshift at which to sample the linear spectrum.
+    k
+        One-dimensional support grid in ``1/Mpc``.
+    """
     k = np.asarray(k, dtype=float)
     pk_linear = np.asarray([cosmo.pk_lin(float(ki), float(z)) for ki in k], dtype=float)
     return _build_linear_input_from_classy(
@@ -172,7 +235,17 @@ def build_linear_input_from_classy(cosmo: Any, z: float, k: np.ndarray) -> Linea
 
 
 def build_linear_input_from_cosmoprimo(cosmo: Any, z: float, k: np.ndarray) -> LinearPowerInput:
-    """Build a linear-input container from a `cosmoprimo.Cosmology` instance."""
+    """Build `LinearPowerInput` from a live `cosmoprimo.Cosmology`.
+
+    Parameters
+    ----------
+    cosmo
+        `cosmoprimo.Cosmology` instance with an attached engine.
+    z
+        Redshift at which to sample the linear spectrum.
+    k
+        One-dimensional support grid in ``1/Mpc``.
+    """
     engine = getattr(cosmo, "engine", None)
     if engine is None:
         raise ValueError("build_linear_input_from_cosmoprimo requires a cosmoprimo cosmology with an attached engine.")
@@ -206,7 +279,17 @@ def build_linear_input_from_cosmoprimo(cosmo: Any, z: float, k: np.ndarray) -> L
 
 
 def build_classpt_parity_linear_input_from_classy(cosmo: Any, z: float, k: np.ndarray) -> LinearPowerInput:
-    """Build a parity-only linear input using the CLASS-PT internal tree basis term."""
+    """Build parity-oriented linear input from the CLASS-PT internal tree term.
+
+    Parameters
+    ----------
+    cosmo
+        Live `classy.Class` PT cosmology.
+    z
+        Redshift at which to sample the internal tree term.
+    k
+        One-dimensional support grid in ``1/Mpc``.
+    """
     k = np.asarray(k, dtype=float)
     pk_linear = np.asarray([np.asarray(cosmo.pk(float(ki), float(z)), dtype=float)[14] for ki in k], dtype=float)
     return _build_linear_input_from_classy(
@@ -265,7 +348,18 @@ def build_classpt_fftlog_grid_parity_linear_input_from_classy(
     z: float,
     settings: PTSettings | None = None,
 ) -> LinearPowerInput:
-    """Build a parity-only linear input on the FFTLog support grid."""
+    """Build CLASS-PT parity input directly on the internal FFTLog grid.
+
+    Parameters
+    ----------
+    cosmo
+        Live `classy.Class` PT cosmology.
+    z
+        Redshift at which to sample the internal tree term.
+    settings
+        Optional `PTSettings` controlling the FFTLog support grid through
+        ``fftlog_n``, ``fftlog_k0_over_h``, and ``fftlog_kmax_over_h``.
+    """
     settings = PTSettings() if settings is None else settings
     k = _fftlog_support_k(settings, float(cosmo.h()))
     pk_linear = np.asarray([np.asarray(cosmo.pk(float(ki), float(z)), dtype=float)[14] for ki in k], dtype=float)
@@ -291,7 +385,16 @@ def prepare_fftlog_input(
     linear_input: LinearPowerInput,
     settings: PTSettings,
 ) -> FFTLogInput:
-    """Preprocess linear inputs onto the FFTLog grid."""
+    """Preprocess linear input onto the internal FFTLog grid.
+
+    Parameters
+    ----------
+    linear_input
+        Linear spectrum sampled on an arbitrary support grid.
+    settings
+        `PTSettings` that define the FFTLog support grid and IR-resummation
+        request flags.
+    """
     kdisc = _fftlog_support_k(settings, float(linear_input.h))
     support_k = np.asarray(linear_input.k, dtype=float)
 
@@ -482,6 +585,21 @@ def _default_classy_engine_settings(
 
 @dataclass(frozen=True, slots=True)
 class ResolvedCosmologyState:
+    """Concrete cosmology/template resolution result.
+
+    Attributes
+    ----------
+    cosmology
+        Resolved live cosmology object, or ``None`` for fixed linear-input
+        templates.
+    linear_input
+        Linear-theory input derived from the cosmology state.
+    cosmology_params
+        Full cosmology parameter mapping used to build ``cosmology``.
+    query_key
+        Immutable cache key representing the resolved cosmology state.
+    """
+
     cosmology: Any
     linear_input: LinearPowerInput
     cosmology_params: dict[str, Any]
@@ -489,6 +607,14 @@ class ResolvedCosmologyState:
 
 
 class BaseCosmologyProvider:
+    """Abstract provider that turns cosmology parameters into linear input.
+
+    Parameters
+    ----------
+    fiducial_params
+        Mapping of queryable cosmology parameters and their fiducial values.
+    """
+
     name = "base"
 
     def __init__(self, fiducial_params: dict[str, Any]) -> None:
@@ -496,9 +622,27 @@ class BaseCosmologyProvider:
         self.query_param_names = set(self.fiducial_params)
 
     def accepts_param(self, name: str) -> bool:
+        """Return whether the provider accepts the supplied cosmology name or alias."""
         return name in self.query_param_names or any(name in aliases for aliases in _COSMOLOGY_ALIAS_GROUPS)
 
     def resolve(self, *, overrides: dict[str, Any], z: float, k: np.ndarray | None, settings: PTSettings, input_recipe: str | None) -> ResolvedCosmologyState:
+        """Resolve cosmology overrides into a live cosmology and linear input.
+
+        Parameters
+        ----------
+        overrides
+            Query-time cosmology overrides.
+        z
+            Redshift at which the linear input should be built.
+        k
+            Optional support grid in ``1/Mpc``. Some recipes ignore this and
+            derive the grid internally.
+        settings
+            `PTSettings` controlling backend- and FFTLog-related options.
+        input_recipe
+            Optional recipe string. Supported values depend on the concrete
+            provider and are documented on `PowerSpectrumTemplate`.
+        """
         normalized = _normalize_cosmology_overrides(overrides)
         invalid = sorted(name for name in normalized if name not in self.query_param_names)
         if invalid:
@@ -515,13 +659,26 @@ class BaseCosmologyProvider:
         )
 
     def build_cosmology(self, cosmology_params: dict[str, Any]) -> Any:
+        """Construct a live cosmology object from the supplied parameter mapping."""
         raise NotImplementedError
 
     def build_linear_input(self, *, cosmology: Any, z: float, k: np.ndarray | None, settings: PTSettings, input_recipe: str | None) -> LinearPowerInput:
+        """Build `LinearPowerInput` for a resolved cosmology and recipe."""
         raise NotImplementedError
 
 
 class ClassyCosmologyProvider(BaseCosmologyProvider):
+    """Cosmology provider backed by live `classy.Class` instances.
+
+    Parameters
+    ----------
+    fiducial_params
+        Queryable cosmology parameters and fiducial values.
+    fixed_params
+        Engine/configuration parameters held fixed for every query, such as
+        ``z_pk`` or CLASS-PT control flags.
+    """
+
     name = "classy"
 
     def __init__(self, fiducial_params: dict[str, Any], *, fixed_params: dict[str, Any]) -> None:
@@ -531,6 +688,7 @@ class ClassyCosmologyProvider(BaseCosmologyProvider):
 
     @classmethod
     def from_cosmology(cls, cosmo: Any) -> "ClassyCosmologyProvider":
+        """Build a provider from an existing `classy.Class` cosmology."""
         params = _extract_classy_fiducial_params(cosmo)
         fixed_params, fiducial_params = _split_fixed_and_query_params(params, fixed_names=set(_CLASSY_FIXED_PARAM_NAMES))
         return cls(fiducial_params=fiducial_params, fixed_params=fixed_params)
@@ -544,6 +702,7 @@ class ClassyCosmologyProvider(BaseCosmologyProvider):
         settings: PTSettings,
         input_recipe: str | None,
     ) -> "ClassyCosmologyProvider":
+        """Build a provider from a fiducial cosmology parameter mapping."""
         fixed_params = _default_classy_engine_settings(z=z, settings=settings, input_recipe=input_recipe)
         query_params = dict(params)
         for name in list(query_params):
@@ -552,6 +711,7 @@ class ClassyCosmologyProvider(BaseCosmologyProvider):
         return cls(fiducial_params=query_params, fixed_params=fixed_params)
 
     def build_cosmology(self, cosmology_params: dict[str, Any]) -> Any:
+        """Instantiate and compute a new `classy.Class` cosmology."""
         from classy import Class
 
         cosmo = Class()
@@ -560,6 +720,7 @@ class ClassyCosmologyProvider(BaseCosmologyProvider):
         return cosmo
 
     def build_linear_input(self, *, cosmology: Any, z: float, k: np.ndarray | None, settings: PTSettings, input_recipe: str | None) -> LinearPowerInput:
+        """Build `LinearPowerInput` from a CLASS-backed cosmology and recipe."""
         recipe = "linear_pk" if input_recipe is None else input_recipe
         if recipe == "linear_pk":
             support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)
@@ -577,6 +738,18 @@ class ClassyCosmologyProvider(BaseCosmologyProvider):
 
 
 class CosmoprimoCosmologyProvider(BaseCosmologyProvider):
+    """Cosmology provider backed by `cosmoprimo`.
+
+    Parameters
+    ----------
+    fiducial_params
+        Queryable cosmology parameters and fiducial values.
+    fixed_params
+        Fixed engine/configuration parameters, including the engine name.
+    base_cosmology
+        Optional live cosmoprimo object used as the cloning base for queries.
+    """
+
     name = "cosmoprimo"
 
     def __init__(self, fiducial_params: dict[str, Any], *, fixed_params: dict[str, Any], base_cosmology: Any | None = None) -> None:
@@ -587,12 +760,14 @@ class CosmoprimoCosmologyProvider(BaseCosmologyProvider):
 
     @classmethod
     def from_cosmology(cls, cosmo: Any) -> "CosmoprimoCosmologyProvider":
+        """Build a provider from an existing `cosmoprimo.Cosmology`."""
         params = _extract_cosmoprimo_fiducial_params(cosmo)
         fixed_params = {name: params.pop(name) for name in list(params) if name in _COSMOPRIMO_FIXED_PARAM_NAMES or name == "engine"}
         return cls(fiducial_params=params, fixed_params=fixed_params, base_cosmology=cosmo)
 
     @classmethod
     def from_mapping(cls, params: dict[str, Any], *, engine: str = "class") -> "CosmoprimoCosmologyProvider":
+        """Build a provider from a fiducial cosmology parameter mapping."""
         fixed_params = {"engine": engine}
         query_params = dict(params)
         for name in list(query_params):
@@ -601,6 +776,7 @@ class CosmoprimoCosmologyProvider(BaseCosmologyProvider):
         return cls(fiducial_params=query_params, fixed_params=fixed_params)
 
     def build_cosmology(self, cosmology_params: dict[str, Any]) -> Any:
+        """Instantiate or clone a `cosmoprimo.Cosmology` object."""
         from cosmoprimo import Cosmology
 
         params = {**self.fixed_params, **cosmology_params}
@@ -610,6 +786,7 @@ class CosmoprimoCosmologyProvider(BaseCosmologyProvider):
         return Cosmology(engine=engine, **params)
 
     def build_linear_input(self, *, cosmology: Any, z: float, k: np.ndarray | None, settings: PTSettings, input_recipe: str | None) -> LinearPowerInput:
+        """Build `LinearPowerInput` from a cosmoprimo-backed cosmology."""
         if input_recipe not in {None, "linear_pk"}:
             raise ValueError("Cosmoprimo queryable templates only support input_recipe='linear_pk'.")
         support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)

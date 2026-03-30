@@ -13,6 +13,20 @@ from .tree import compute_counterterm_shape, compute_real_tree_matter
 def compute_tree_level_basis(linear_input: LinearPowerInput, settings, output_k: jnp.ndarray | None = None) -> BasisSpectra:
     """Construct the staged jaxpt basis from linear theory.
 
+    Parameters
+    ----------
+    linear_input
+        Linear-theory input sampled on a support grid.
+    settings
+        `PTSettings` controlling the loop order and FFTLog configuration.
+        Supported values are ``loop_order="tree"`` and
+        ``loop_order="one_loop"``.
+    output_k
+        Optional output grid in ``1/Mpc``. If omitted, the basis is evaluated
+        on the support grid stored in ``linear_input``.
+
+    Notes
+    -----
     The current implementation wires together the kernel stages and returns the
     linear Kaiser contribution plus the tree-level counterterm shapes. One-loop
     physics terms still enter as zeros through the dedicated loop-stage

@@ -37,8 +37,10 @@ def _load_yaml_parameters(filename: str, *, kind_key: str) -> ParameterCollectio
 
 
 def load_power_spectrum_template_parameters() -> ParameterCollection:
+    """Load the packaged default cosmology/template parameter catalog."""
     return _load_yaml_parameters("power_spectrum_template.yaml", kind_key="template")
 
 
 def load_galaxy_power_spectrum_multipoles_parameters() -> ParameterCollection:
+    """Load the packaged default nuisance-parameter catalog for multipoles."""
     return _load_yaml_parameters("galaxy_power_spectrum_multipoles.yaml", kind_key="theory")

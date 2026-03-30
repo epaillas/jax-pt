@@ -56,11 +56,34 @@ theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
 prediction = theory()
 ```
 
+The returned `prediction` is a `MultipolePrediction` with `k`, `p0`, `p2`, and
+`p4` arrays plus backend/theory metadata.
+
+## Main API Surface
+
+- `PTSettings`
+  Controls backend choice, loop order, FFTLog support, and output options.
+- `PowerSpectrumTemplate`
+  Resolves cosmology inputs into a `LinearPowerInput`. The source can be a live
+  `classy.Class`, a live `cosmoprimo.Cosmology`, a fiducial parameter mapping,
+  or a precomputed `LinearPowerInput`.
+- `GalaxyPowerSpectrumMultipolesTheory`
+  High-level observable wrapper that accepts a flat query of nuisance and
+  cosmology parameters and returns `MultipolePrediction`.
+- `compute_basis` and `galaxy_multipoles`
+  Lower-level basis and assembly entry points for users who want to work below
+  the theory layer.
+- `TaylorEmulator` and `build_multipole_emulator`
+  Tools for building hashed Taylor emulators around a fiducial multipole
+  theory.
+
 ## Current Scope
 
 - Tree-level Kaiser basis generation from `LinearPowerInput`
 - One-loop real-space matter and bias terms from analytic FFTLog kernels generated in-repo
 - Assembly of `P_0(k)`, `P_2(k)`, and `P_4(k)`
+- Taylor emulation of native multipole predictions over non-fixed,
+  non-marginalized theory parameters
 - Direct parity tests against installed `CLASS-PT`
 
 Current limitations:
@@ -77,6 +100,27 @@ pytest -q
 ```
 
 The suite includes direct comparisons against the installed `CLASS-PT` backend where available.
+
+## Emulator Training
+
+Build a hashed Taylor emulator for the multipole theory with:
+
+```bash
+python scripts/build_taylor_emulator.py --output-dir scripts/emulator_outputs
+```
+
+The script prints the resolved emulated parameters, held fixed or marginalized
+parameters, theory settings, and a build progress bar. The saved filename uses a
+configuration hash so different theory grids, parameter choices, or Taylor
+settings map to different emulator files.
+
+## Documentation
+
+- Flow chart: [docs/flow.md](/Users/epaillas/code/jax-pt/docs/flow.md)
+- Package overview: [docs/index.md](/Users/epaillas/code/jax-pt/docs/index.md)
+- CLASS-PT tree-level parity notes: [docs/classpt-tree-parity.md](/Users/epaillas/code/jax-pt/docs/classpt-tree-parity.md)
+- FFTLog matrix provenance: [docs/matrices.md](/Users/epaillas/code/jax-pt/docs/matrices.md)
+- MCMC bottleneck notes: [docs/mcmc-bottleneck-analysis.md](/Users/epaillas/code/jax-pt/docs/mcmc-bottleneck-analysis.md)
 
 ## Authors and References
 

@@ -53,6 +53,7 @@ DEFAULT_PARAMS = {
 
 @dataclass(frozen=True, slots=True)
 class TimingSummary:
+    """Summary statistics for repeated latency measurements in milliseconds."""
     mean_ms: float
     median_ms: float
     min_ms: float
@@ -62,6 +63,7 @@ class TimingSummary:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI parser for the real-space benchmark script."""
     parser = argparse.ArgumentParser(
         description="Benchmark real-space galaxy power-spectrum prediction latency for jaxpt and CLASS-PT."
     )
@@ -88,6 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def summarize(samples: list[float]) -> TimingSummary:
+    """Convert raw timing samples in seconds into a millisecond summary."""
     arr = np.asarray(samples, dtype=float) * 1.0e3
     return TimingSummary(
         mean_ms=float(arr.mean()),
@@ -100,6 +103,7 @@ def summarize(samples: list[float]) -> TimingSummary:
 
 
 def time_callable(fn, *, warmup: int, repeat: int) -> tuple[float, TimingSummary]:
+    """Measure cold-call latency and steady-state latency for a callable."""
     t0 = time.perf_counter()
     fn()
     cold_ms = (time.perf_counter() - t0) * 1.0e3
@@ -116,6 +120,7 @@ def time_callable(fn, *, warmup: int, repeat: int) -> tuple[float, TimingSummary
 
 
 def make_latency_figure(output_path: Path, cold: dict[str, float], steady: dict[str, TimingSummary]) -> None:
+    """Write the cold vs warm latency comparison figure."""
     labels = ["jaxpt native", "CLASS-PT direct"]
     means = [steady["native"].mean_ms, steady["classpt_direct"].mean_ms]
     stds = [steady["native"].std_ms, steady["classpt_direct"].std_ms]
@@ -138,6 +143,7 @@ def make_latency_figure(output_path: Path, cold: dict[str, float], steady: dict[
 
 
 def make_scaling_figure(output_path: Path, scaling_rows: list[dict[str, float]]) -> None:
+    """Write the latency-vs-grid-size scaling figure."""
     fig, ax = plt.subplots(figsize=(7.6, 4.8), constrained_layout=True)
 
     for key, label in (
@@ -171,6 +177,7 @@ def benchmark_point(
     warmup: int,
     repeat: int,
 ) -> dict[str, object]:
+    """Benchmark one real-space prediction setup for both jaxpt and CLASS-PT."""
     native_predict = build_realspace_predictor(linear_input, settings=settings, k=eval_k)
     native_fn = lambda: np.asarray(
         native_predict(
@@ -213,6 +220,7 @@ def benchmark_point(
 
 
 def main() -> None:
+    """Run the real-space latency benchmark and write plots plus JSON output."""
     args = build_parser().parse_args()
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
