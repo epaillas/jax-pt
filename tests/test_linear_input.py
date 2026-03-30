@@ -19,9 +19,9 @@ from jaxpt.theories import load_galaxy_power_spectrum_multipoles_parameters, loa
 from jaxpt.cosmology import (
     BaseCosmologyProvider,
     ResolvedCosmologyState,
-    build_classpt_native_grid_parity_linear_input_from_classy,
+    build_classpt_fftlog_grid_parity_linear_input_from_classy,
     build_classpt_parity_linear_input_from_classy,
-    prepare_native_fftlog_input,
+    prepare_fftlog_input,
 )
 
 
@@ -170,7 +170,7 @@ def test_build_classpt_parity_linear_input_from_classy() -> None:
     assert linear_input.metadata["linear_pk_source"] == "classpt_internal_tree"
 
 
-def test_build_classpt_native_grid_parity_linear_input_from_classy() -> None:
+def test_build_classpt_fftlog_grid_parity_linear_input_from_classy() -> None:
     z = 0.5
     settings = PTSettings(ir_resummation=False)
 
@@ -198,16 +198,16 @@ def test_build_classpt_native_grid_parity_linear_input_from_classy() -> None:
     )
     cosmo.compute()
 
-    linear_input = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
+    linear_input = build_classpt_fftlog_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
 
     assert linear_input.k.shape == (settings.fftlog_n,)
     assert linear_input.transfer_linear is not None
     assert linear_input.metadata["linear_pk_source"] == "classpt_internal_tree"
-    assert linear_input.metadata["support_grid"] == "native_fftlog_kdisc"
+    assert linear_input.metadata["support_grid"] == "fftlog_kdisc"
     assert linear_input.metadata["transfer_source"] == "classy_phi_scaled"
 
 
-def test_prepare_native_fftlog_input_aligns_to_internal_grid() -> None:
+def test_prepare_fftlog_input_aligns_to_internal_grid() -> None:
     k = np.logspace(-4, 0, 64)
     linear_input = LinearPowerInput(
         k=k,
@@ -220,7 +220,7 @@ def test_prepare_native_fftlog_input_aligns_to_internal_grid() -> None:
         h=0.7,
     )
 
-    fftlog_input = prepare_native_fftlog_input(linear_input, PTSettings(ir_resummation=False))
+    fftlog_input = prepare_fftlog_input(linear_input, PTSettings(ir_resummation=False))
 
     assert fftlog_input.kdisc.shape == (PTSettings().fftlog_n,)
     assert fftlog_input.pdisc.shape == fftlog_input.kdisc.shape
@@ -229,7 +229,7 @@ def test_prepare_native_fftlog_input_aligns_to_internal_grid() -> None:
     assert fftlog_input.tnw is not None
     assert fftlog_input.pw is not None
     assert fftlog_input.tw is not None
-    assert fftlog_input.metadata["fftlog_grid_source"] == "native_kdisc"
+    assert fftlog_input.metadata["fftlog_grid_source"] == "fftlog_kdisc"
     assert fftlog_input.metadata["fftlog_input_aligned"] is False
 
 
@@ -379,7 +379,7 @@ def test_power_spectrum_template_constructor_uses_default_support_grid_for_cosmo
     np.testing.assert_allclose(template.linear_input.k[[0, -1]], np.array([1.0e-5, 1.0e1]))
 
 
-def test_power_spectrum_template_constructor_supports_classpt_native_grid_parity_recipe() -> None:
+def test_power_spectrum_template_constructor_supports_classpt_fftlog_grid_parity_recipe() -> None:
     z = 0.5
     settings = PTSettings(ir_resummation=False)
 
@@ -407,12 +407,12 @@ def test_power_spectrum_template_constructor_supports_classpt_native_grid_parity
     )
     cosmo.compute()
 
-    expected = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
-    template = PowerSpectrumTemplate(cosmo, z=z, settings=settings, input_recipe="classpt_native_grid_parity")
+    expected = build_classpt_fftlog_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
+    template = PowerSpectrumTemplate(cosmo, z=z, settings=settings, input_recipe="classpt_fftlog_grid_parity")
 
     np.testing.assert_allclose(template.linear_input.k, expected.k)
     np.testing.assert_allclose(template.linear_input.pk_linear, expected.pk_linear)
-    assert template.linear_input.metadata["support_grid"] == "native_fftlog_kdisc"
+    assert template.linear_input.metadata["support_grid"] == "fftlog_kdisc"
 
 
 def test_power_spectrum_template_rejects_missing_z_for_cosmology_source() -> None:
@@ -644,7 +644,7 @@ def test_queryable_template_reuses_basis_for_nuisance_only_updates(monkeypatch) 
     assert calls == [100.0, 100.0 * 0.13 / 0.12]
 
 
-def test_native_tree_loop_order_matches_kaiser_prediction() -> None:
+def test_jaxpt_tree_loop_order_matches_kaiser_prediction() -> None:
     k = np.logspace(-3, -1, 8)
     pk_linear = np.linspace(100.0, 200.0, k.size)
     linear_input = LinearPowerInput(
@@ -673,7 +673,7 @@ def test_native_tree_loop_order_matches_kaiser_prediction() -> None:
     assert basis.metadata["realspace_bias"] is False
 
 
-def test_native_backend_rejects_unknown_backend() -> None:
+def test_jaxpt_backend_rejects_unknown_backend() -> None:
     linear_input = LinearPowerInput(
         k=np.logspace(-3, -2, 4),
         pk_linear=np.ones(4),
@@ -683,11 +683,11 @@ def test_native_backend_rejects_unknown_backend() -> None:
         h=0.7,
     )
 
-    with pytest.raises(ValueError, match="settings.backend == 'native'"):
+    with pytest.raises(ValueError, match="settings.backend == 'jaxpt'"):
         compute_basis(linear_input, settings=PTSettings(backend="legacy", ir_resummation=False))
 
 
-def test_native_backend_rejects_resummation_without_support() -> None:
+def test_jaxpt_backend_rejects_resummation_without_support() -> None:
     linear_input = LinearPowerInput(
         k=np.logspace(-3, -2, 4),
         pk_linear=np.ones(4),
@@ -701,7 +701,7 @@ def test_native_backend_rejects_resummation_without_support() -> None:
         compute_basis(linear_input, settings=PTSettings(ir_resummation=True))
 
 
-def test_native_backend_applies_k_window() -> None:
+def test_jaxpt_backend_applies_k_window() -> None:
     k = np.logspace(-3, -1, 8)
     linear_input = LinearPowerInput(
         k=k,
@@ -718,7 +718,7 @@ def test_native_backend_applies_k_window() -> None:
     assert np.all(np.asarray(basis.k) <= 5.0e-2)
 
 
-def test_native_backend_does_not_load_importlib_matrix_assets() -> None:
+def test_jaxpt_backend_does_not_load_importlib_matrix_assets() -> None:
     linear_input = LinearPowerInput(
         k=np.logspace(-3, -1, 16),
         pk_linear=np.linspace(100.0, 200.0, 16),

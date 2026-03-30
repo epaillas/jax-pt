@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 from jaxpt.bias import galaxy_real_spectrum
 from jaxpt.config import PTSettings
 from jaxpt.cosmology import build_linear_input_from_classy
-from jaxpt.native import compute_basis
+from jaxpt.basis import compute_basis
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -46,12 +46,12 @@ LINEAR_SUPPORT_K = np.logspace(-5.0, 1.0, 256)
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Compare the native tree-level and one-loop jaxpt real-space galaxy power spectra."
+        description="Compare the tree-level and one-loop jaxpt real-space galaxy power spectra."
     )
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path(__file__).with_name("native_tree_vs_oneloop.png"),
+        default=Path(__file__).with_name("tree_vs_oneloop.png"),
         help="Path to the output PNG file.",
     )
     parser.add_argument(
@@ -102,11 +102,11 @@ def main() -> None:
     )
 
     fig, ax = plt.subplots(figsize=(7.0, 4.5), constrained_layout=True)
-    ax.plot(eval_k, eval_k * tree_pk, label="jaxpt native tree", lw=2.0)
-    ax.plot(eval_k, eval_k * one_loop_pk, label="jaxpt native one-loop", lw=2.0, ls="--")
+    ax.plot(eval_k, eval_k * tree_pk, label="jaxpt tree", lw=2.0)
+    ax.plot(eval_k, eval_k * one_loop_pk, label="jaxpt one-loop", lw=2.0, ls="--")
     ax.set_xlabel("k [1/Mpc]")
     ax.set_ylabel(r"$k\,P_{gg}(k)$ [Mpc$^2$]")
-    ax.set_title("Native Tree vs One-Loop Real-Space Galaxy Power Spectrum, z = 0.5")
+    ax.set_title("Tree vs One-Loop Real-Space Galaxy Power Spectrum, z = 0.5")
     ax.grid(True, alpha=0.25)
     ax.legend()
 

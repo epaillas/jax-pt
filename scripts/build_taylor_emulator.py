@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 import numpy as np
 
-from jaxpt import PTSettings, build_native_multipole_taylor_emulator
+from jaxpt import PTSettings, build_multipole_emulator
 from jaxpt.theories import (
     GalaxyPowerSpectrumMultipolesTheory,
     PowerSpectrumTemplate,
@@ -34,7 +34,7 @@ def _parse_assignment(text: str) -> tuple[str, float]:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Build a hashed Taylor emulator for native jaxpt power-spectrum multipoles.")
+    parser = argparse.ArgumentParser(description="Build a hashed Taylor emulator for jaxpt power-spectrum multipoles.")
     parser.add_argument("--z", type=float, default=0.5, help="Redshift at which to build the emulator.")
     parser.add_argument("--kmin", type=float, default=0.01, help="Minimum evaluation k in 1/Mpc.")
     parser.add_argument("--kmax", type=float, default=0.2, help="Maximum evaluation k in 1/Mpc.")
@@ -103,7 +103,7 @@ def main() -> None:
     nuisance_defaults = load_galaxy_power_spectrum_multipoles_parameters().defaults_dict()
     cosmology_defaults.update(dict(args.cosmo))
 
-    settings = PTSettings(backend="native", ir_resummation=False)
+    settings = PTSettings(backend="jaxpt", ir_resummation=False)
     eval_k = np.linspace(args.kmin, args.kmax, args.nk)
 
     template = PowerSpectrumTemplate(cosmology_defaults, z=args.z, settings=settings, provider="cosmoprimo")
@@ -122,14 +122,14 @@ def main() -> None:
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    emulator = build_native_multipole_taylor_emulator(
+    emulator = build_multipole_emulator(
         theory,
         order=args.order,
         step_sizes=step_sizes,
         param_names=explicit_params if explicit_params else None,
         cache_dir=output_dir,
         finite_difference_accuracy=args.finite_difference_accuracy,
-        metadata={"script": "build_native_multipole_taylor_emulator"},
+        metadata={"script": "build_multipole_emulator"},
         progress_callback=_render_progress,
         force=args.force,
     )

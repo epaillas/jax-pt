@@ -3,7 +3,7 @@ from __future__ import annotations
 import jax.numpy as jnp
 
 from ..basis import make_basis
-from ..cosmology import LinearPowerInput, prepare_native_fftlog_input
+from ..cosmology import LinearPowerInput, prepare_fftlog_input
 from ..reference.classpt import BasisSpectra
 from .loops import compute_real_loop_terms, compute_rsd_loop_terms
 from .rsd import compute_counterterm_multipoles, compute_linear_rsd_terms
@@ -11,7 +11,7 @@ from .tree import compute_counterterm_shape, compute_real_tree_matter
 
 
 def compute_tree_level_basis(linear_input: LinearPowerInput, settings, output_k: jnp.ndarray | None = None) -> BasisSpectra:
-    """Construct the staged native basis from linear theory.
+    """Construct the staged jaxpt basis from linear theory.
 
     The current implementation wires together the kernel stages and returns the
     linear Kaiser contribution plus the tree-level counterterm shapes. One-loop
@@ -28,7 +28,7 @@ def compute_tree_level_basis(linear_input: LinearPowerInput, settings, output_k:
     real_counterterm_shape = compute_counterterm_shape(linear_input, output_k=output_k)
     fftlog_input = None
     if settings.loop_order == "one_loop":
-        fftlog_input = prepare_native_fftlog_input(linear_input, settings)
+        fftlog_input = prepare_fftlog_input(linear_input, settings)
 
     components = {
         "real_tree_matter": real_tree_matter,
@@ -43,7 +43,7 @@ def compute_tree_level_basis(linear_input: LinearPowerInput, settings, output_k:
     metadata = {
         "backend": settings.backend,
         "approximation": "linear_kaiser" if settings.loop_order == "tree" else "analytic_fftlog_realspace",
-        "kernel_source": "tree" if settings.loop_order == "tree" else settings.native_kernel_source,
+        "kernel_source": "tree" if settings.loop_order == "tree" else settings.kernel_source,
         "spectral_method": "none" if settings.loop_order == "tree" else "fftlog_jax",
         "resummed": False,
         "ir_resummation": False,
@@ -59,7 +59,7 @@ def compute_tree_level_basis(linear_input: LinearPowerInput, settings, output_k:
         "pk_mult_shape": None,
     }
     if fftlog_input is not None:
-        metadata["fftlog_grid_source"] = fftlog_input.metadata.get("fftlog_grid_source", "native_kdisc")
+        metadata["fftlog_grid_source"] = fftlog_input.metadata.get("fftlog_grid_source", "fftlog_kdisc")
         metadata["fftlog_input_aligned"] = fftlog_input.metadata.get("fftlog_input_aligned")
     return make_basis(
         k=k,

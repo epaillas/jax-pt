@@ -11,7 +11,7 @@ from ..theories import GalaxyPowerSpectrumMultipolesTheory
 from .taylor import TaylorEmulator
 
 
-def build_native_multipole_taylor_emulator(
+def build_multipole_emulator(
     theory: GalaxyPowerSpectrumMultipolesTheory,
     *,
     order: int = 4,
@@ -24,8 +24,8 @@ def build_native_multipole_taylor_emulator(
     progress_callback=None,
     force: bool = False,
 ) -> TaylorEmulator:
-    if theory.template.settings.backend != "native":
-        raise ValueError("build_native_multipole_taylor_emulator requires a native GalaxyPowerSpectrumMultipolesTheory.")
+    if theory.template.settings.backend != "jaxpt":
+        raise ValueError("build_multipole_emulator requires a jaxpt GalaxyPowerSpectrumMultipolesTheory.")
 
     if theory.template.is_queryable:
         params = theory.params
@@ -54,7 +54,7 @@ def build_native_multipole_taylor_emulator(
         for name in valid_param_names
     }
     build_metadata = {
-        "emulator_kind": "native_multipole_taylor",
+        "emulator_kind": "multipole_taylor",
         "theory": theory.__class__.__name__,
         "backend": theory.template.settings.backend,
         "z": float(theory.z),

@@ -5,7 +5,7 @@
 - `LinearPowerInput.pk_linear <- cosmo.pk_lin(k, z)`
 
 This remains the default because it is the clean public linear-theory input and
-matches the intended native tree-level Kaiser interpretation.
+matches the intended jaxpt tree-level Kaiser interpretation.
 
 ## Tree-Level Mismatch Origin
 
@@ -42,7 +42,7 @@ linear spectrum, not the raw public `pk_lin(k, z)` value.
 ## Policy In jaxpt
 
 `jaxpt` keeps the direct `pk_lin(k, z)` path as the default production input.
-That is the cleaner and more explicit native-theory input.
+That is the cleaner and more explicit jaxpt-theory input.
 
 For strict backend parity checks, `jaxpt` also provides a separate helper:
 

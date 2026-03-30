@@ -8,7 +8,7 @@ from sympy import lambdify, symbols
 from sympy.parsing.mathematica import parse_mathematica
 
 from ..config import PTSettings
-from ..cosmology import LinearPowerInput, NativeFFTLogInput, prepare_native_fftlog_input
+from ..cosmology import FFTLogInput, LinearPowerInput, prepare_fftlog_input
 from .spectral import (
     _analytic_realspace_kernel_registry,
     _fftlog_coefficients_jax,
@@ -121,14 +121,14 @@ def _build_bias_matrices(m22basic: np.ndarray, etam2: np.ndarray, growth_rate: f
     }
 
 
-def compute_native_rsd_terms(
+def compute_fftlog_rsd_terms(
     linear_input: LinearPowerInput,
     settings: PTSettings,
     output_k: jnp.ndarray | None = None,
-    fftlog_input: NativeFFTLogInput | None = None,
+    fftlog_input: FFTLogInput | None = None,
 ) -> dict[str, jnp.ndarray]:
-    if settings.native_kernel_source != "analytic":
-        raise NotImplementedError("Native one-loop RSD kernels only support native_kernel_source='analytic'.")
+    if settings.kernel_source != "analytic":
+        raise NotImplementedError("FFTLog one-loop RSD kernels only support kernel_source='analytic'.")
 
     nmax = settings.fftlog_n
     kernels = _analytic_realspace_kernel_registry(
@@ -141,7 +141,7 @@ def compute_native_rsd_terms(
     transfer = _analytic_rsd_transfer_registry(nmax, settings.fftlog_k0_over_h, settings.fftlog_kmax_over_h)
 
     if fftlog_input is None:
-        fftlog_input = prepare_native_fftlog_input(linear_input, settings)
+        fftlog_input = prepare_fftlog_input(linear_input, settings)
 
     kdisc = jnp.asarray(np.asarray(fftlog_input.kdisc, dtype=float))
     if output_k is None:
@@ -227,7 +227,7 @@ def compute_native_rsd_terms(
 
     p_ifg2 = jnp.abs(jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x2, jnp.asarray(kernels["ifg2"])) * pbin))
 
-    native = {
+    terms = {
         "rsd_l0_loop_00": _interpolate_to_output_jax(kdisc, l0_vv_mu + p12_l0_vv, output_k),
         "rsd_l0_loop_01": _interpolate_to_output_jax(kdisc, l0_vd_mu + p12_l0_vd, output_k),
         "rsd_l0_loop_11": _interpolate_to_output_jax(kdisc, l0_dd_mu + p12_l0_dd, output_k),
@@ -241,5 +241,5 @@ def compute_native_rsd_terms(
         "rsd_l0_gamma3_bias": _interpolate_to_output_jax(kdisc, -(f / 3.0) * p_ifg2, output_k),
         "rsd_l2_gamma3": _interpolate_to_output_jax(kdisc, -(2.0 * f / 3.0) * p_ifg2, output_k),
     }
-    native.update({name: _interpolate_to_output_jax(kdisc, values, output_k) for name, values in bias_terms.items()})
-    return native
+    terms.update({name: _interpolate_to_output_jax(kdisc, values, output_k) for name, values in bias_terms.items()})
+    return terms

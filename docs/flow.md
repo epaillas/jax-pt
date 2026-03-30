@@ -10,10 +10,10 @@ The canonical entrypoint is now the theory layer in `jaxpt.theories`, typically
 flowchart TD
     A["GalaxyPowerSpectrumMultipolesTheory(...) or ClassPTGalaxyPowerSpectrumMultipolesTheory(...)"] --> B["theory(parameters)"]
     B --> C["template.resolve(cosmology_overrides)"]
-    C -->|"native backend"| D["compute_basis(linear_input, settings, k?)"]
+    C -->|"jaxpt backend"| D["compute_basis(linear_input, settings, k?)"]
     C -->|"CLASS-PT backend"| J["predict_classpt_multipoles(...)"]
 
-    subgraph Native["Native basis construction"]
+    subgraph Jaxpt["Jaxpt basis construction"]
         D --> D1{"k override?"}
         D1 -->|"yes"| D2["project basis terms to output k"]
         D1 -->|"no"| D3["use input k grid directly"]
@@ -27,14 +27,14 @@ flowchart TD
         F --> F5["compute_counterterm_multipoles(...)"]
         F --> F6["compute_rsd_loop_terms(...)"]
 
-        subgraph NativeLoops["Current native loop implementation"]
+        subgraph JaxptLoops["Current jaxpt loop implementation"]
             F3 --> G0{"settings.loop_order"}
             G0 -->|"tree"| G1["return zero-valued real-space loop terms"]
-            G0 -->|"one_loop"| G2["compute_native_realspace_terms(...)"]
+            G0 -->|"one_loop"| G2["compute_fftlog_realspace_terms(...)"]
             G2 --> G3["FFTLog coefficient extraction\njnp.fft.fft(...)"]
             G2 --> G4["analytic real-space kernels\nM13, M22, J, IFG2"]
             G2 --> G5["vectorized spectral contractions"]
-            F6 --> G6["compute_native_rsd_terms(...)"]
+            F6 --> G6["compute_fftlog_rsd_terms(...)"]
         end
 
         F1 --> H["make_basis(...)"]
@@ -50,11 +50,11 @@ flowchart TD
     J --> K["MultipolePrediction\nP0(k), P2(k), P4(k)"]
 ```
 
-Tree-level and one-loop predictions share the same basis-construction pipeline, with `settings.loop_order` switching the loop stages between zeros and the analytic FFTLog-native one-loop terms.
+Tree-level and one-loop predictions share the same basis-construction pipeline, with `settings.loop_order` switching the loop stages between zeros and the analytic FFTLog one-loop terms.
 
-## Native Real-Space Flow
+## Jaxpt Real-Space Flow
 
-The native real-space prediction path reuses the same basis-construction stage and then assembles
+The jaxpt real-space prediction path reuses the same basis-construction stage and then assembles
 the observable in `jaxpt/bias.py`.
 
 ```mermaid
@@ -68,5 +68,5 @@ flowchart TD
     F --> H["real-space P_gg(k)"]
 ```
 
-The assembly layer is shared between native and synthetic test bases. `CLASS-PT` remains the
+The assembly layer is shared between jaxpt and synthetic test bases. `CLASS-PT` remains the
 validation oracle, but it is no longer a basis-construction branch in the public API.

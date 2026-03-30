@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import PTSettings, build_linear_input_from_classy, build_native_realspace_predictor
+from jaxpt import PTSettings, build_linear_input_from_classy, build_realspace_predictor
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -171,7 +171,7 @@ def benchmark_point(
     warmup: int,
     repeat: int,
 ) -> dict[str, object]:
-    native_predict = build_native_realspace_predictor(linear_input, settings=settings, k=eval_k)
+    native_predict = build_realspace_predictor(linear_input, settings=settings, k=eval_k)
     native_fn = lambda: np.asarray(
         native_predict(
             b1=DEFAULT_PARAMS["b1"],

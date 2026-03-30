@@ -3,9 +3,9 @@ from __future__ import annotations
 import jax.numpy as jnp
 
 from ..config import PTSettings
-from ..cosmology import LinearPowerInput, NativeFFTLogInput
-from .rsd_spectral import compute_native_rsd_terms
-from .spectral import compute_native_realspace_terms
+from ..cosmology import FFTLogInput, LinearPowerInput
+from .rsd_spectral import compute_fftlog_rsd_terms
+from .spectral import compute_fftlog_realspace_terms
 
 
 _RSD_LOOP_COMPONENT_NAMES = (
@@ -58,33 +58,33 @@ def compute_real_loop_terms(
     linear_input: LinearPowerInput,
     settings: PTSettings,
     output_k: jnp.ndarray | None = None,
-    fftlog_input: NativeFFTLogInput | None = None,
+    fftlog_input: FFTLogInput | None = None,
 ) -> dict[str, jnp.ndarray]:
     k = jnp.asarray(linear_input.k) if output_k is None else output_k
     if settings.loop_order == "tree":
         return _zero_real_loop_terms(k)
     if settings.loop_order != "one_loop":
-        raise ValueError("Native compute_real_loop_terms only supports settings.loop_order in {'tree', 'one_loop'}.")
+        raise ValueError("compute_real_loop_terms only supports settings.loop_order in {'tree', 'one_loop'}.")
 
     if fftlog_input is None:
-        native = compute_native_realspace_terms(linear_input, settings, output_k=output_k)
+        terms = compute_fftlog_realspace_terms(linear_input, settings, output_k=output_k)
     else:
-        from .spectral import compute_native_realspace_terms_from_preprocessed
+        from .spectral import compute_fftlog_realspace_terms_from_preprocessed
 
-        native = compute_native_realspace_terms_from_preprocessed(fftlog_input, settings, output_k=output_k)
-    return {name: jnp.asarray(values) for name, values in native.items()}
+        terms = compute_fftlog_realspace_terms_from_preprocessed(fftlog_input, settings, output_k=output_k)
+    return {name: jnp.asarray(values) for name, values in terms.items()}
 
 
 def compute_rsd_loop_terms(
     linear_input: LinearPowerInput,
     settings: PTSettings,
     output_k: jnp.ndarray | None = None,
-    fftlog_input: NativeFFTLogInput | None = None,
+    fftlog_input: FFTLogInput | None = None,
 ) -> dict[str, jnp.ndarray]:
     if settings.loop_order == "tree":
         k = jnp.asarray(linear_input.k) if output_k is None else output_k
         return _zero_rsd_loop_terms(k)
     if settings.loop_order != "one_loop":
-        raise ValueError("Native compute_rsd_loop_terms only supports settings.loop_order in {'tree', 'one_loop'}.")
-    native = compute_native_rsd_terms(linear_input, settings, output_k=output_k, fftlog_input=fftlog_input)
-    return {name: jnp.asarray(native[name]) for name in _RSD_LOOP_COMPONENT_NAMES}
+        raise ValueError("compute_rsd_loop_terms only supports settings.loop_order in {'tree', 'one_loop'}.")
+    terms = compute_fftlog_rsd_terms(linear_input, settings, output_k=output_k, fftlog_input=fftlog_input)
+    return {name: jnp.asarray(terms[name]) for name in _RSD_LOOP_COMPONENT_NAMES}

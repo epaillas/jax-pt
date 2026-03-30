@@ -11,20 +11,20 @@ from jaxpt import (
     PTSettings,
     build_linear_input_from_classy,
     build_linear_input_from_cosmoprimo,
-    build_native_realspace_predictor,
+    build_realspace_predictor,
     compare_multipoles_to_classpt,
     compute_basis,
     galaxy_real_spectrum,
     galaxy_multipoles,
 )
 from jaxpt.cosmology import (
-    build_classpt_native_grid_parity_linear_input_from_classy,
+    build_classpt_fftlog_grid_parity_linear_input_from_classy,
     build_classpt_parity_linear_input_from_classy,
-    prepare_native_fftlog_input,
+    prepare_fftlog_input,
 )
 from jaxpt.bias import matter_real_spectrum
-from jaxpt.kernels.rsd_spectral import compute_native_rsd_terms
-from jaxpt.kernels.spectral import compute_native_realspace_terms_from_preprocessed
+from jaxpt.kernels.rsd_spectral import compute_fftlog_rsd_terms
+from jaxpt.kernels.spectral import compute_fftlog_realspace_terms_from_preprocessed
 from jaxpt.reference.classpt import BasisSpectra, MultipolePrediction, PK_MULT_INDEX
 
 from conftest import DEFAULT_PT_OPTIONS, DEFAULT_PT_OPTIONS_NOIR, FIDUCIAL_COSMOLOGY, SHIFTED_COSMOLOGY, make_bias_params
@@ -196,7 +196,7 @@ def test_native_theory_accepts_linear_input_template(benchmark_k: np.ndarray) ->
     prediction = theory(params)
 
     assert prediction.p0.shape == benchmark_k.shape
-    assert prediction.metadata["backend"] == "native"
+    assert prediction.metadata["backend"] == "jaxpt"
 
 
 def test_classpt_theory_accepts_linear_input_template(benchmark_k: np.ndarray) -> None:
@@ -248,7 +248,7 @@ def test_native_and_classpt_theory_share_high_level_api(benchmark_k: np.ndarray)
     cosmo.compute()
 
     native_settings = PTSettings(ir_resummation=False)
-    native_template = PowerSpectrumTemplate(cosmo, z=z, settings=native_settings, input_recipe="classpt_native_grid_parity")
+    native_template = PowerSpectrumTemplate(cosmo, z=z, settings=native_settings, input_recipe="classpt_fftlog_grid_parity")
     native_prediction = GalaxyPowerSpectrumMultipolesTheory(template=native_template, k=benchmark_k)(params)
 
     classpt_template = PowerSpectrumTemplate(cosmo, z=z, settings=PTSettings(ir_resummation=False))
@@ -257,7 +257,7 @@ def test_native_and_classpt_theory_share_high_level_api(benchmark_k: np.ndarray)
     assert native_prediction.k.shape == benchmark_k.shape
     assert classpt_prediction.k.shape == benchmark_k.shape
     assert native_prediction.metadata["template"] == classpt_prediction.metadata["template"]
-    assert native_prediction.metadata["backend"] == "native"
+    assert native_prediction.metadata["backend"] == "jaxpt"
     assert classpt_prediction.metadata["backend"] == "classpt"
     assert classpt_prediction.metadata["theory"] == "ClassPTGalaxyPowerSpectrumMultipolesTheory"
 
@@ -346,7 +346,7 @@ def test_native_grid_parity_input_reduces_live_classpt_multipole_mismatch() -> N
     ]
 
     coarse_input = build_classpt_parity_linear_input_from_classy(cosmo, z=z, k=np.logspace(-5.0, 1.0, 256))
-    native_grid_input = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
+    native_grid_input = build_classpt_fftlog_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
 
     coarse_prediction = galaxy_multipoles(compute_basis(coarse_input, settings=settings, k=eval_k), params)
     native_grid_prediction = galaxy_multipoles(compute_basis(native_grid_input, settings=settings, k=eval_k), params)
@@ -376,11 +376,11 @@ def test_preprocessed_fftlog_input_matches_direct_loop_kernel_entrypoints() -> N
     cosmo.set({**FIDUCIAL_COSMOLOGY, **DEFAULT_PT_OPTIONS_NOIR, "output": "mTk,mPk", "z_pk": z})
     cosmo.compute()
 
-    linear_input = build_classpt_native_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
-    fftlog_input = prepare_native_fftlog_input(linear_input, settings)
+    linear_input = build_classpt_fftlog_grid_parity_linear_input_from_classy(cosmo, z=z, settings=settings)
+    fftlog_input = prepare_fftlog_input(linear_input, settings)
 
-    real_terms = compute_native_realspace_terms_from_preprocessed(fftlog_input, settings, output_k=eval_k)
-    rsd_terms = compute_native_rsd_terms(linear_input, settings, output_k=eval_k, fftlog_input=fftlog_input)
+    real_terms = compute_fftlog_realspace_terms_from_preprocessed(fftlog_input, settings, output_k=eval_k)
+    rsd_terms = compute_fftlog_rsd_terms(linear_input, settings, output_k=eval_k, fftlog_input=fftlog_input)
 
     direct_basis = compute_basis(linear_input, settings=settings, k=eval_k)
 
@@ -666,7 +666,7 @@ def test_compiled_native_realspace_predictor_matches_basis_path() -> None:
         )
     )
 
-    predictor = build_native_realspace_predictor(linear_input, settings=settings, k=eval_k)
+    predictor = build_realspace_predictor(linear_input, settings=settings, k=eval_k)
     compiled = np.asarray(
         predictor(
             b1=2.0,
@@ -710,7 +710,7 @@ def test_compiled_tree_predictor_matches_basis_path() -> None:
         )
     )
 
-    predictor = build_native_realspace_predictor(linear_input, settings=settings)
+    predictor = build_realspace_predictor(linear_input, settings=settings)
     compiled = np.asarray(
         predictor(
             b1=2.0,

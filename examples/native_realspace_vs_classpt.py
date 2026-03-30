@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 from jaxpt.bias import galaxy_real_spectrum
 from jaxpt.config import PTSettings
 from jaxpt.cosmology import build_linear_input_from_classy
-from jaxpt.native import compute_basis
+from jaxpt.basis import compute_basis
 
 
 FIDUCIAL_COSMOLOGY = {

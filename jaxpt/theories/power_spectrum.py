@@ -16,7 +16,7 @@ from ..cosmology import (
     LinearPowerInput,
     ResolvedCosmologyState,
 )
-from ..native import compute_basis
+from ..basis import compute_basis
 from ..reference.classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
 from .base import BasePowerSpectrumTheory, default_nuisance_parameters, finalize_multipole_prediction, normalize_flat_query
 from .defaults import load_power_spectrum_template_parameters
@@ -177,7 +177,7 @@ class GalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
 
     def __post_init__(self) -> None:
         BasePowerSpectrumTheory.__post_init__(self)
-        if self.template.settings.backend not in {"native", "classpt"}:
+        if self.template.settings.backend not in {"jaxpt", "classpt"}:
             raise ValueError(f"Unsupported multipole backend '{self.template.settings.backend}'.")
         if self.template.settings.backend == "classpt" and not self.template.is_queryable:
             if self.template.linear_input.metadata.get("_classpt_cosmo") is None:

@@ -58,15 +58,15 @@ prediction = theory()
 
 ## Current Scope
 
-- Native tree-level Kaiser basis generation from `LinearPowerInput`
-- Native one-loop real-space matter and bias terms from analytic FFTLog kernels generated in-repo
-- Native assembly of `P_0(k)`, `P_2(k)`, and `P_4(k)`
+- Tree-level Kaiser basis generation from `LinearPowerInput`
+- One-loop real-space matter and bias terms from analytic FFTLog kernels generated in-repo
+- Assembly of `P_0(k)`, `P_2(k)`, and `P_4(k)`
 - Direct parity tests against installed `CLASS-PT`
 
 Current limitations:
 
-- IR resummation is not implemented in the native backend
-- AP effects are not implemented in the native backend
+- IR resummation is not implemented in the `jaxpt` backend
+- AP effects are not implemented in the `jaxpt` backend
 
 ## Validation
 

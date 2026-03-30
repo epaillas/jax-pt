@@ -9,7 +9,7 @@ import numpy as np
 from scipy.special import gamma
 
 from ..config import PTSettings
-from ..cosmology import LinearPowerInput, NativeFFTLogInput, prepare_native_fftlog_input
+from ..cosmology import FFTLogInput, LinearPowerInput, prepare_fftlog_input
 
 _EPS = 1.0e-6
 _CUTOFF_OVER_H = 3.0
@@ -200,15 +200,15 @@ def _interpolate_to_output_jax(kdisc: jnp.ndarray, values: jnp.ndarray, output_k
 
 
 @partial(jax.jit, static_argnames=("settings",))
-def compute_native_realspace_terms_from_arrays(
+def compute_fftlog_realspace_terms_from_arrays(
     support_k: jnp.ndarray,
     pk_linear: jnp.ndarray,
     output_k: jnp.ndarray,
     h: float,
     settings: PTSettings,
 ) -> dict[str, jnp.ndarray]:
-    if settings.native_kernel_source != "analytic":
-        raise NotImplementedError("Native real-space loops only support native_kernel_source='analytic'.")
+    if settings.kernel_source != "analytic":
+        raise NotImplementedError("FFTLog real-space loops only support kernel_source='analytic'.")
 
     nmax = settings.fftlog_n
     kernels = _analytic_realspace_kernel_registry(
@@ -280,13 +280,13 @@ def compute_native_realspace_terms_from_arrays(
     }
 
 
-def compute_native_realspace_terms_from_preprocessed(
-    fftlog_input: NativeFFTLogInput,
+def compute_fftlog_realspace_terms_from_preprocessed(
+    fftlog_input: FFTLogInput,
     settings: PTSettings,
     output_k: jnp.ndarray | None = None,
 ) -> dict[str, jnp.ndarray]:
-    if settings.native_kernel_source != "analytic":
-        raise NotImplementedError("Native real-space loops only support native_kernel_source='analytic'.")
+    if settings.kernel_source != "analytic":
+        raise NotImplementedError("FFTLog real-space loops only support kernel_source='analytic'.")
 
     nmax = settings.fftlog_n
     kernels = _analytic_realspace_kernel_registry(
@@ -349,12 +349,12 @@ def compute_native_realspace_terms_from_preprocessed(
     }
 
 
-def compute_native_realspace_terms(
+def compute_fftlog_realspace_terms(
     linear_input: LinearPowerInput,
     settings: PTSettings,
     output_k: jnp.ndarray | None = None,
 ) -> dict[str, jnp.ndarray]:
-    fftlog_input = prepare_native_fftlog_input(linear_input, settings)
+    fftlog_input = prepare_fftlog_input(linear_input, settings)
     if output_k is None:
         output_k = jnp.asarray(np.asarray(linear_input.k, dtype=float))
-    return compute_native_realspace_terms_from_preprocessed(fftlog_input, settings, output_k=output_k)
+    return compute_fftlog_realspace_terms_from_preprocessed(fftlog_input, settings, output_k=output_k)

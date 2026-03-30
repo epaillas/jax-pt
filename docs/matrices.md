@@ -1,6 +1,6 @@
 # FFTLog Matrices
 
-This note documents the precomputed FFTLog matrix assets used by `CLASS-PT`. `jaxpt` no longer vendors or loads these files at runtime, but the background is still useful because the current native analytic kernels follow the same general FFTLog decomposition.
+This note documents the precomputed FFTLog matrix assets used by `CLASS-PT`. `jaxpt` no longer vendors or loads these files at runtime, but the background is still useful because the current analytic kernels follow the same general FFTLog decomposition.
 
 ## What These Files Are
 
@@ -17,7 +17,7 @@ This note documents the precomputed FFTLog matrix assets used by `CLASS-PT`. `ja
 
 In the `CLASS-PT` loop formulation, the cosmology-dependent part of the one-loop integrals is separated from a cosmology-independent FFTLog kernel. Once the FFTLog discretization is fixed, the expensive kernel part becomes a set of reusable matrices and vectors.
 
-The current native port uses the same fixed discretization as the `CLASS-PT` `N256` branch:
+The current jaxpt port uses the same fixed discretization as the `CLASS-PT` `N256` branch:
 
 - `N = 256`
 - `k0 = 5e-5`
@@ -65,6 +65,6 @@ converts the unpacked triangular representation into the packed on-disk format u
 
 ## Current Status In jaxpt
 
-The current native backend generates the needed FFTLog kernels analytically in-repo and does not ship local copies of the `CLASS-PT` matrix files.
+The current `jaxpt` backend generates the needed FFTLog kernels analytically in-repo and does not ship local copies of the `CLASS-PT` matrix files.
 
 This document remains useful as provenance for the fixed `N256` discretization and as a reminder of how the original `CLASS-PT` implementation factors the one-loop problem.

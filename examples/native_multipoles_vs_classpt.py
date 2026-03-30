@@ -79,7 +79,7 @@ def main() -> None:
     # Use the CLASS-PT internal tree-basis spectrum here so this example targets
     # backend parity rather than the default native `pk_lin` input convention.
     native_settings = PTSettings(ir_resummation=False)
-    native_template = PowerSpectrumTemplate(cosmo, z=z, settings=native_settings, input_recipe="classpt_native_grid_parity")
+    native_template = PowerSpectrumTemplate(cosmo, z=z, settings=native_settings, input_recipe="classpt_fftlog_grid_parity")
     native_theory = GalaxyPowerSpectrumMultipolesTheory(template=native_template, k=EVAL_K)
     native = native_theory()
 

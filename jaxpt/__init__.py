@@ -3,10 +3,10 @@ from jax import config as _jax_config
 _jax_config.update("jax_enable_x64", True)
 
 from .bias import galaxy_multipoles, galaxy_real_spectrum, matter_real_spectrum
+from .basis import build_realspace_predictor, compute_basis
 from .config import PTSettings
 from .cosmology import LinearPowerInput, build_linear_input_from_classy, build_linear_input_from_cosmoprimo
-from .emulators import TaylorEmulator, build_native_multipole_taylor_emulator
-from .native import build_native_realspace_predictor, compute_basis
+from .emulators import TaylorEmulator, build_multipole_emulator
 from .parameter import Parameter, ParameterCollection
 from .reference.classpt import BasisSpectra, MultipolePrediction
 from .reference.parity import compare_multipoles_to_classpt, compare_predictions
@@ -29,10 +29,10 @@ __all__ = [
     "PTSettings",
     "PowerSpectrumTemplate",
     "TaylorEmulator",
-    "build_native_multipole_taylor_emulator",
+    "build_multipole_emulator",
     "build_linear_input_from_classy",
     "build_linear_input_from_cosmoprimo",
-    "build_native_realspace_predictor",
+    "build_realspace_predictor",
     "compare_multipoles_to_classpt",
     "compare_predictions",
     "compute_basis",

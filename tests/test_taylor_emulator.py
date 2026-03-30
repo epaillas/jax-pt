@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from jaxpt import LinearPowerInput, PTSettings, TaylorEmulator, build_native_multipole_taylor_emulator
+from jaxpt import LinearPowerInput, PTSettings, TaylorEmulator, build_multipole_emulator
 from jaxpt.reference.classpt import MultipolePrediction
 from jaxpt.theories import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
 
@@ -182,7 +182,7 @@ def test_taylor_emulator_build_reports_progress_and_skips_on_cache_hit(tmp_path)
     assert cached_calls == []
 
 
-def test_taylor_emulator_tracks_nearby_native_multipole_theory() -> None:
+def test_taylor_emulator_tracks_nearby_jaxpt_multipole_theory() -> None:
     linear_input = LinearPowerInput(
         k=np.logspace(-3.0, 0.0, 64),
         pk_linear=np.linspace(2.0e4, 5.0e2, 64),
@@ -221,7 +221,7 @@ def test_taylor_emulator_tracks_nearby_native_multipole_theory() -> None:
     np.testing.assert_allclose(predicted.p4, expected.p4, rtol=3e-3, atol=1e-3)
 
 
-def test_build_native_multipole_taylor_emulator_uses_non_fixed_non_marginalized_params(tmp_path) -> None:
+def test_build_multipole_emulator_uses_non_fixed_non_marginalized_params(tmp_path) -> None:
     linear_input = LinearPowerInput(
         k=np.logspace(-3.0, 0.0, 64),
         pk_linear=np.linspace(2.0e4, 5.0e2, 64),
@@ -235,7 +235,7 @@ def test_build_native_multipole_taylor_emulator_uses_non_fixed_non_marginalized_
         k=np.linspace(0.02, 0.18, 8),
     )
 
-    emulator = build_native_multipole_taylor_emulator(
+    emulator = build_multipole_emulator(
         theory,
         order=1,
         step_sizes=0.05,
@@ -251,7 +251,7 @@ def test_build_native_multipole_taylor_emulator_uses_non_fixed_non_marginalized_
         emulator.predict({"cs2": make_bias_params()["cs2"] + 1.0})
 
 
-def test_build_native_multipole_taylor_emulator_rejects_marginalized_parameter_request() -> None:
+def test_build_multipole_emulator_rejects_marginalized_parameter_request() -> None:
     linear_input = LinearPowerInput(
         k=np.logspace(-3.0, 0.0, 64),
         pk_linear=np.linspace(2.0e4, 5.0e2, 64),
@@ -266,7 +266,7 @@ def test_build_native_multipole_taylor_emulator_rejects_marginalized_parameter_r
     )
 
     with pytest.raises(ValueError, match="non-fixed and non-marginalized"):
-        build_native_multipole_taylor_emulator(
+        build_multipole_emulator(
             theory,
             order=1,
             step_sizes=0.05,
@@ -274,7 +274,7 @@ def test_build_native_multipole_taylor_emulator_rejects_marginalized_parameter_r
         )
 
 
-def test_build_native_multipole_taylor_emulator_script_smoke(tmp_path) -> None:
+def test_build_multipole_emulator_script_smoke(tmp_path) -> None:
     pytest.importorskip("classy")
     script = Path(__file__).resolve().parents[1] / "scripts" / "build_taylor_emulator.py"
     result = subprocess.run(

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True, slots=True)
 class PTSettings:
-    backend: str = "native"
+    backend: str = "jaxpt"
     loop_order: str = "one_loop"
     ir_resummation: bool = True
     cb: bool = True
@@ -22,6 +22,6 @@ class PTSettings:
     fftlog_kmax_over_h: float = 1.0e2
     fftlog_bias_matter: float = -0.3
     fftlog_bias_bias: float = -1.6000001
-    native_kernel_cache: bool = True
-    native_kernel_source: str = "analytic"
+    kernel_cache: bool = True
+    kernel_source: str = "analytic"
     require_nowiggle: bool = False

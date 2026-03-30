@@ -65,7 +65,7 @@ class LinearPowerInput:
 
 
 @dataclass(frozen=True, slots=True)
-class NativeFFTLogInput:
+class FFTLogInput:
     kdisc: np.ndarray
     pdisc: np.ndarray
     tdisc: np.ndarray
@@ -84,11 +84,11 @@ class NativeFFTLogInput:
         pdisc = np.asarray(self.pdisc, dtype=float)
         tdisc = np.asarray(self.tdisc, dtype=float)
         if kdisc.ndim != 1:
-            raise ValueError("NativeFFTLogInput.kdisc must be one-dimensional.")
+            raise ValueError("FFTLogInput.kdisc must be one-dimensional.")
         if pdisc.shape != kdisc.shape or tdisc.shape != kdisc.shape:
-            raise ValueError("NativeFFTLogInput spectra must have the same shape as kdisc.")
+            raise ValueError("FFTLogInput spectra must have the same shape as kdisc.")
         if np.any(np.diff(kdisc) <= 0.0):
-            raise ValueError("NativeFFTLogInput.kdisc must be strictly increasing.")
+            raise ValueError("FFTLogInput.kdisc must be strictly increasing.")
         object.__setattr__(self, "kdisc", kdisc)
         object.__setattr__(self, "pdisc", pdisc)
         object.__setattr__(self, "tdisc", tdisc)
@@ -99,7 +99,7 @@ class NativeFFTLogInput:
                 continue
             array = np.asarray(values, dtype=float)
             if array.shape != kdisc.shape:
-                raise ValueError(f"NativeFFTLogInput.{name} must have the same shape as kdisc.")
+                raise ValueError(f"FFTLogInput.{name} must have the same shape as kdisc.")
             object.__setattr__(self, name, array)
 
 
@@ -218,7 +218,7 @@ def build_classpt_parity_linear_input_from_classy(cosmo: Any, z: float, k: np.nd
     )
 
 
-def _native_fftlog_support_k(settings: PTSettings, h: float) -> np.ndarray:
+def _fftlog_support_k(settings: PTSettings, h: float) -> np.ndarray:
     delta = np.log(settings.fftlog_kmax_over_h / settings.fftlog_k0_over_h) / (settings.fftlog_n - 1.0)
     return settings.fftlog_k0_over_h * h * np.exp(np.arange(settings.fftlog_n, dtype=float) * delta)
 
@@ -260,14 +260,14 @@ def _classy_phi_transfer(cosmo: Any, z: float, k: np.ndarray, reference_transfer
     return scale * interpolated_phi
 
 
-def build_classpt_native_grid_parity_linear_input_from_classy(
+def build_classpt_fftlog_grid_parity_linear_input_from_classy(
     cosmo: Any,
     z: float,
     settings: PTSettings | None = None,
 ) -> LinearPowerInput:
-    """Build a parity-only linear input on the native FFTLog support grid."""
+    """Build a parity-only linear input on the FFTLog support grid."""
     settings = PTSettings() if settings is None else settings
-    k = _native_fftlog_support_k(settings, float(cosmo.h()))
+    k = _fftlog_support_k(settings, float(cosmo.h()))
     pk_linear = np.asarray([np.asarray(cosmo.pk(float(ki), float(z)), dtype=float)[14] for ki in k], dtype=float)
     primordial_pk = _primordial_power_spectrum_from_classy_params(k, getattr(cosmo, "pars", {}))
     derived_transfer = None if primordial_pk is None else (5.0 / 3.0) * np.sqrt(pk_linear / primordial_pk)
@@ -281,18 +281,18 @@ def build_classpt_native_grid_parity_linear_input_from_classy(
         linear_pk_source="classpt_internal_tree",
         transfer_linear=transfer_linear,
         extra_metadata={
-            "support_grid": "native_fftlog_kdisc",
+            "support_grid": "fftlog_kdisc",
             "transfer_source": transfer_source,
         },
     )
 
 
-def prepare_native_fftlog_input(
+def prepare_fftlog_input(
     linear_input: LinearPowerInput,
     settings: PTSettings,
-) -> NativeFFTLogInput:
-    """Preprocess linear inputs onto the native FFTLog grid."""
-    kdisc = _native_fftlog_support_k(settings, float(linear_input.h))
+) -> FFTLogInput:
+    """Preprocess linear inputs onto the FFTLog grid."""
+    kdisc = _fftlog_support_k(settings, float(linear_input.h))
     support_k = np.asarray(linear_input.k, dtype=float)
 
     aligned_support = support_k.shape == kdisc.shape and np.allclose(support_k, kdisc, rtol=0.0, atol=0.0)
@@ -324,12 +324,12 @@ def prepare_native_fftlog_input(
     metadata = dict(linear_input.metadata)
     metadata.update(
         {
-            "fftlog_grid_source": "native_kdisc",
+            "fftlog_grid_source": "fftlog_kdisc",
             "fftlog_input_aligned": aligned_support,
             "fftlog_input_mode": "no_ir" if not settings.ir_resummation else "ir_requested",
         }
     )
-    return NativeFFTLogInput(
+    return FFTLogInput(
         kdisc=kdisc,
         pdisc=pdisc,
         tdisc=tdisc,
@@ -364,7 +364,13 @@ _COSMOLOGY_ALIAS_GROUPS = (
 
 
 def _freeze_cache_value(value: Any) -> Any:
+    if isinstance(value, (str, bytes, bool)):
+        return value
     array = np.asarray(value)
+    if array.dtype.kind in {"U", "S", "O"}:
+        if array.ndim == 0:
+            return array.item()
+        return tuple(array.reshape(-1).tolist())
     if array.ndim == 0:
         return float(array)
     return tuple(float(item) for item in array.reshape(-1))
@@ -457,7 +463,7 @@ def _default_classy_engine_settings(
     if recipe == "linear_pk":
         params["output"] = "mPk"
         return params
-    if recipe in {"classpt_parity", "classpt_native_grid_parity"}:
+    if recipe in {"classpt_parity", "classpt_fftlog_grid_parity"}:
         params.update(
             {
                 "output": "mTk,mPk",
@@ -470,7 +476,7 @@ def _default_classy_engine_settings(
         )
         return params
     raise ValueError(
-        "Unsupported CLASS query recipe. Expected one of {'linear_pk', 'classpt_parity', 'classpt_native_grid_parity'}."
+        "Unsupported CLASS query recipe. Expected one of {'linear_pk', 'classpt_parity', 'classpt_fftlog_grid_parity'}."
     )
 
 
@@ -541,7 +547,7 @@ class ClassyCosmologyProvider(BaseCosmologyProvider):
         fixed_params = _default_classy_engine_settings(z=z, settings=settings, input_recipe=input_recipe)
         query_params = dict(params)
         for name in list(query_params):
-            if name in fixed_params:
+            if name in _CLASSY_FIXED_PARAM_NAMES or name in fixed_params:
                 fixed_params[name] = query_params.pop(name)
         return cls(fiducial_params=query_params, fixed_params=fixed_params)
 
@@ -561,12 +567,12 @@ class ClassyCosmologyProvider(BaseCosmologyProvider):
         if recipe == "classpt_parity":
             support_k = _default_support_k(settings) if k is None else np.asarray(k, dtype=float)
             return build_classpt_parity_linear_input_from_classy(cosmology, z=float(z), k=support_k)
-        if recipe == "classpt_native_grid_parity":
+        if recipe == "classpt_fftlog_grid_parity":
             if k is not None:
-                raise ValueError("CLASS native-grid parity recipes derive the support grid internally and do not accept k.")
-            return build_classpt_native_grid_parity_linear_input_from_classy(cosmology, z=float(z), settings=settings)
+                raise ValueError("CLASS FFTLog-grid parity recipes derive the support grid internally and do not accept k.")
+            return build_classpt_fftlog_grid_parity_linear_input_from_classy(cosmology, z=float(z), settings=settings)
         raise ValueError(
-            "Unsupported CLASS query recipe. Expected one of {'linear_pk', 'classpt_parity', 'classpt_native_grid_parity'}."
+            "Unsupported CLASS query recipe. Expected one of {'linear_pk', 'classpt_parity', 'classpt_fftlog_grid_parity'}."
         )
 
 
