@@ -7,6 +7,7 @@ from .basis import build_realspace_predictor, compute_basis
 from .config import PTSettings
 from .cosmology import LinearPowerInput, build_linear_input_from_classy, build_linear_input_from_cosmoprimo
 from .emulators import TaylorEmulator, build_multipole_emulator
+from .inference import BaseSampler, PocoMCSampler
 from .parameter import Parameter, ParameterCollection
 from .reference.classpt import BasisSpectra, MultipolePrediction
 from .reference.parity import compare_multipoles_to_classpt, compare_predictions
@@ -25,9 +26,11 @@ __all__ = [
     "GalaxyPowerSpectrumMultipolesTheory",
     "LinearPowerInput",
     "MultipolePrediction",
+    "BaseSampler",
     "Parameter",
     "ParameterCollection",
     "PTSettings",
+    "PocoMCSampler",
     "PowerSpectrumTemplate",
     "TaylorEmulator",
     "build_multipole_emulator",

@@ -3,11 +3,13 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+import json
 
 import numpy as np
 import pytest
 
 from jaxpt import LinearPowerInput, PTSettings, TaylorEmulator, build_multipole_emulator
+from jaxpt.parameter import ParameterCollection
 from jaxpt.reference.classpt import MultipolePrediction
 from jaxpt.theories import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
 
@@ -137,6 +139,8 @@ def test_taylor_emulator_save_load_and_hash_cache(tmp_path) -> None:
     loaded = TaylorEmulator.load(emulator.cache_path)
     query = {"x": 0.03, "y": -0.04}
     np.testing.assert_allclose(loaded.predict(query), theory(query), rtol=1e-11, atol=1e-11)
+    assert loaded.params["x"].value == 0.0
+    assert loaded.params["z"].value == 1.5
     with pytest.raises(ValueError, match="were not emulated"):
         loaded.predict({"z": 0.0})
 
@@ -150,6 +154,54 @@ def test_taylor_emulator_save_load_and_hash_cache(tmp_path) -> None:
         metadata={"theory": "toy"},
     )
     assert other._resolve_cache_path() != emulator.cache_path
+
+
+def test_taylor_emulator_preserves_parameter_collection_metadata(tmp_path) -> None:
+    params = ParameterCollection(
+        {
+            "x": {"value": 1.0, "prior": {"type": "gaussian", "mean": 1.0, "sigma": 0.2}},
+            "y": {"value": 2.0, "fixed": True},
+        }
+    )
+
+    emulator = TaylorEmulator(
+        lambda query: np.asarray([query["x"] + query["y"]], dtype=float),
+        fiducial=params.defaults_dict(),
+        order=1,
+        step_sizes={"x": 0.1},
+        param_names=["x"],
+        valid_param_names=["x", "y"],
+        params=params,
+    ).build()
+
+    path = tmp_path / "toy_emulator.npz"
+    emulator.save(path)
+    loaded = TaylorEmulator.load(path)
+
+    assert loaded.params["x"].prior == {"type": "gaussian", "mean": 1.0, "sigma": 0.2}
+    assert loaded.params["y"].fixed is True
+    assert loaded.params["y"].value == 2.0
+
+
+def test_taylor_emulator_loads_legacy_file_without_parameter_metadata(tmp_path) -> None:
+    emulator = TaylorEmulator(
+        lambda query: np.asarray([query["x"] ** 2], dtype=float),
+        fiducial={"x": 1.0},
+        order=2,
+        step_sizes={"x": 0.1},
+    ).build()
+    path = tmp_path / "legacy_emulator.npz"
+    emulator.save(path)
+
+    with np.load(path, allow_pickle=False) as data:
+        config = json.loads(str(data["config_json"]))
+        config.pop("parameter_collection", None)
+        payload = {name: data[name] for name in data.files if name != "config_json"}
+    np.savez(path, **payload, config_json=json.dumps(config, sort_keys=True))
+
+    loaded = TaylorEmulator.load(path)
+    np.testing.assert_allclose(loaded.predict({"x": 1.2}), np.asarray([1.2**2], dtype=float), rtol=1e-11, atol=1e-11)
+    assert loaded.params["x"].prior is None
 
 
 def test_taylor_emulator_build_reports_progress_and_skips_on_cache_hit(tmp_path) -> None:

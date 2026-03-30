@@ -10,6 +10,7 @@ from typing import Any
 
 import numpy as np
 
+from ..parameter import Parameter, ParameterCollection
 from ..reference.classpt import MultipolePrediction
 
 
@@ -53,6 +54,26 @@ def _freeze_cache_value(value: Any) -> Any:
     if isinstance(value, (str, bool, int, float)) or value is None:
         return value
     return repr(value)
+
+
+def _serialize_parameter_collection(params: ParameterCollection) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": parameter.name,
+            "value": parameter.value,
+            "fixed": parameter.fixed,
+            "marginalized": parameter.marginalized,
+            "prior": None if parameter.prior is None else dict(parameter.prior),
+            "metadata": dict(parameter.metadata),
+        }
+        for parameter in params
+    ]
+
+
+def _deserialize_parameter_collection(payload: list[dict[str, Any]] | None) -> ParameterCollection | None:
+    if payload is None:
+        return None
+    return ParameterCollection(payload)
 
 
 def _factorial_product(powers: np.ndarray) -> int:
@@ -231,6 +252,7 @@ class TaylorEmulator:
     finite_difference_accuracy: int = 2
     metadata: Mapping[str, Any] | None = None
     valid_param_names: list[str] | tuple[str, ...] | None = None
+    params: ParameterCollection | Mapping[str, Any] | None = None
     _step_sizes: dict[str, float] = field(init=False, repr=False)
     _powers: np.ndarray = field(init=False, repr=False)
     _stencils: dict[int, tuple[np.ndarray, np.ndarray]] = field(init=False, repr=False)
@@ -281,6 +303,7 @@ class TaylorEmulator:
         if unknown_emulated:
             raise ValueError(f"TaylorEmulator.param_names must be a subset of valid_param_names. Invalid: {', '.join(unknown_emulated)}.")
         self._constrained_param_names = tuple(name for name in self._valid_param_names if name not in set(self.param_names))
+        self.params = self._resolve_params(self.params)
 
         self._step_sizes = self._resolve_step_sizes(self.step_sizes)
         self._powers = _enumerate_multi_indices(len(self.param_names), self.order)
@@ -293,6 +316,19 @@ class TaylorEmulator:
         self._output_adapter = self.output_adapter
         self._eval_cache: dict[tuple[int, ...], np.ndarray] = {}
         self._cache_path: Path | None = None
+
+    def _resolve_params(self, params: ParameterCollection | Mapping[str, Any] | None) -> ParameterCollection:
+        if params is None and self.theory_fn is not None and hasattr(self.theory_fn, "params"):
+            theory_params = getattr(self.theory_fn, "params")
+            if isinstance(theory_params, ParameterCollection):
+                params = theory_params.copy()
+        resolved = ParameterCollection(params)
+        for name in self._valid_param_names:
+            if name in resolved:
+                resolved[name].update(value=self.fiducial[name])
+            else:
+                resolved.set(Parameter(name=name, value=self.fiducial[name]))
+        return resolved
 
     def _resolve_step_sizes(self, step_sizes: float | Mapping[str, float]) -> dict[str, float]:
         resolved: dict[str, float] = {}
@@ -344,6 +380,7 @@ class TaylorEmulator:
             "constrained_fiducial": {name: self.fiducial[name] for name in self._constrained_param_names},
             "adapter_tag": None if self._output_adapter is None else self._output_adapter.tag,
             "metadata": dict(self.metadata),
+            "parameter_collection": _serialize_parameter_collection(self.params),
         }
 
     def _default_cache_key(self) -> str:
@@ -560,6 +597,7 @@ class TaylorEmulator:
                 finite_difference_accuracy=int(config["finite_difference_accuracy"]),
                 metadata=config.get("metadata", {}),
                 valid_param_names=config.get("valid_param_names"),
+                params=_deserialize_parameter_collection(config.get("parameter_collection")),
             )
             emulator._valid_param_names = tuple(str(name) for name in config.get("valid_param_names", data["param_names"].tolist()))
             emulator._constrained_param_names = tuple(
