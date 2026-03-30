@@ -14,11 +14,8 @@ from .theories import (
     ClassPTGalaxyPowerSpectrumMultipolesTheory,
     GalaxyPowerSpectrumMultipolesTheory,
     PowerSpectrumTemplate,
-    load_galaxy_power_spectrum_multipoles_defaults,
     load_galaxy_power_spectrum_multipoles_parameters,
-    load_power_spectrum_template_defaults,
     load_power_spectrum_template_parameters,
-    predict_galaxy_multipoles,
 )
 
 __all__ = [
@@ -40,10 +37,7 @@ __all__ = [
     "compute_basis",
     "galaxy_multipoles",
     "galaxy_real_spectrum",
-    "load_galaxy_power_spectrum_multipoles_defaults",
     "load_galaxy_power_spectrum_multipoles_parameters",
-    "load_power_spectrum_template_defaults",
     "load_power_spectrum_template_parameters",
     "matter_real_spectrum",
-    "predict_galaxy_multipoles",
 ]

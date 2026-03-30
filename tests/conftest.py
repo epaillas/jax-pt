@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt.theories import load_galaxy_power_spectrum_multipoles_defaults
+from jaxpt.theories import load_galaxy_power_spectrum_multipoles_parameters
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -48,7 +48,7 @@ DEFAULT_PT_OPTIONS_NOIR = {
 
 
 def make_bias_params(**overrides: float) -> dict[str, float]:
-    return {**load_galaxy_power_spectrum_multipoles_defaults(), **overrides}
+    return {**load_galaxy_power_spectrum_multipoles_parameters().defaults_dict(), **overrides}
 
 
 @pytest.fixture

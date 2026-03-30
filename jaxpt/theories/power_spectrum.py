@@ -19,14 +19,10 @@ from ..cosmology import (
 from ..native import compute_basis
 from ..reference.classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
 from .base import BasePowerSpectrumTheory, default_nuisance_parameters, finalize_multipole_prediction, normalize_flat_query
-from .defaults import (
-    load_galaxy_power_spectrum_multipoles_defaults,
-    load_power_spectrum_template_defaults,
-    load_power_spectrum_template_parameters,
-)
+from .defaults import load_power_spectrum_template_parameters
 
 
-_TEMPLATE_DEFAULTS = load_power_spectrum_template_defaults()
+_TEMPLATE_DEFAULTS = load_power_spectrum_template_parameters().defaults_dict()
 _TEMPLATE_PARAMETERS = load_power_spectrum_template_parameters()
 
 
@@ -270,51 +266,3 @@ class ClassPTGalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
             theory_name=self.__class__.__name__,
             template_name=self.template.__class__.__name__,
         )
-
-
-def predict_galaxy_multipoles(
-    source,
-    *args,
-    params: Mapping[str, float] | None = None,
-    settings: PTSettings | None = None,
-    return_components: bool = False,
-    **kwargs,
-):
-    if isinstance(source, (GalaxyPowerSpectrumMultipolesTheory, ClassPTGalaxyPowerSpectrumMultipolesTheory)):
-        if params is None:
-            params = args[0] if args else None
-        return source(params, return_components=return_components, **kwargs)
-
-    if isinstance(source, PowerSpectrumTemplate):
-        if params is None:
-            params = args[0] if args else None
-        theory_cls = (
-            ClassPTGalaxyPowerSpectrumMultipolesTheory
-            if source.settings.backend == "classpt"
-            else GalaxyPowerSpectrumMultipolesTheory
-        )
-        eval_k = np.asarray(source.linear_input.k if source.k is None else source.k, dtype=float)
-        theory = theory_cls(template=source, k=eval_k, return_components=return_components)
-        return theory(params, return_components=return_components, **kwargs)
-
-    if isinstance(source, BasisSpectra):
-        if params is None:
-            if not args:
-                raise TypeError("predict_galaxy_multipoles requires params when called with a BasisSpectra source.")
-            params = args[0]
-        basis = source
-    elif isinstance(source, LinearPowerInput):
-        if params is None:
-            if not args:
-                raise TypeError("predict_galaxy_multipoles requires params when called with a LinearPowerInput source.")
-            params = args[0]
-        theory_cls = ClassPTGalaxyPowerSpectrumMultipolesTheory if settings is not None and settings.backend == "classpt" else GalaxyPowerSpectrumMultipolesTheory
-        theory = theory_cls(template=PowerSpectrumTemplate(source, settings=settings), k=np.asarray(source.k, dtype=float), return_components=return_components)
-        return theory(params, return_components=return_components)
-    else:
-        raise TypeError(
-            "predict_galaxy_multipoles only accepts GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate, BasisSpectra, or LinearPowerInput. "
-            "Build a LinearPowerInput or PowerSpectrumTemplate before calling it."
-        )
-
-    return galaxy_multipoles(basis, params, return_components=return_components)

@@ -16,7 +16,6 @@ from jaxpt import (
     compute_basis,
     galaxy_real_spectrum,
     galaxy_multipoles,
-    predict_galaxy_multipoles,
 )
 from jaxpt.cosmology import (
     build_classpt_native_grid_parity_linear_input_from_classy,
@@ -182,7 +181,7 @@ def test_live_classpt_parity_for_galaxy_multipoles(benchmark_k: np.ndarray, cosm
     assert comparison["p4"]["max_rel"] == 0.0
 
 
-def test_predict_galaxy_multipoles_accepts_linear_input(benchmark_k: np.ndarray) -> None:
+def test_native_theory_accepts_linear_input_template(benchmark_k: np.ndarray) -> None:
     z = 0.5
     cosmo = Class()
     cosmo.set({**FIDUCIAL_COSMOLOGY, "z_pk": z, "output": "mPk"})
@@ -190,14 +189,17 @@ def test_predict_galaxy_multipoles_accepts_linear_input(benchmark_k: np.ndarray)
 
     linear_input = build_linear_input_from_classy(cosmo, z=z, k=benchmark_k)
     params = make_bias_params(b2=0.0, bG2=0.0, bGamma3=0.0, cs2=0.0, Pshot=0.0, b4=0.0)
-
-    prediction = predict_galaxy_multipoles(linear_input, params, settings=PTSettings(ir_resummation=False))
+    theory = GalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(linear_input, settings=PTSettings(ir_resummation=False)),
+        k=benchmark_k,
+    )
+    prediction = theory(params)
 
     assert prediction.p0.shape == benchmark_k.shape
     assert prediction.metadata["backend"] == "native"
 
 
-def test_predict_galaxy_multipoles_accepts_classpt_backend_from_linear_input(benchmark_k: np.ndarray) -> None:
+def test_classpt_theory_accepts_linear_input_template(benchmark_k: np.ndarray) -> None:
     z = 0.5
     cosmo = Class()
     cosmo.set({**FIDUCIAL_COSMOLOGY, **DEFAULT_PT_OPTIONS_NOIR, "output": "mTk,mPk", "z_pk": z})
@@ -205,8 +207,11 @@ def test_predict_galaxy_multipoles_accepts_classpt_backend_from_linear_input(ben
 
     linear_input = build_linear_input_from_classy(cosmo, z=z, k=benchmark_k)
     params = make_bias_params()
-
-    prediction = predict_galaxy_multipoles(linear_input, params, settings=PTSettings(backend="classpt", ir_resummation=False))
+    theory = ClassPTGalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(linear_input, settings=PTSettings(backend="classpt", ir_resummation=False)),
+        k=benchmark_k,
+    )
+    prediction = theory(params)
 
     cosmo.initialize_output(benchmark_k, z, len(benchmark_k))
     expected_p0 = np.asarray(cosmo.pk_gg_l0(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs0"], params["Pshot"], params["b4"]))

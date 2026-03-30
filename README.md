@@ -20,8 +20,8 @@ Reference checks and examples that compare against CLASS-PT require a local `CLA
 import numpy as np
 from classy import Class
 
-from jaxpt import PTSettings, build_linear_input_from_classy, compute_basis, galaxy_multipoles
-from jaxpt.theories import load_galaxy_power_spectrum_multipoles_defaults
+from jaxpt import PTSettings
+from jaxpt.theories import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
 
 z = 0.5
 support_k = np.logspace(-5.0, 1.0, 256)
@@ -51,10 +51,9 @@ cosmo.set(
 )
 cosmo.compute()
 
-linear_input = build_linear_input_from_classy(cosmo, z=z, k=support_k)
-basis = compute_basis(linear_input, settings=PTSettings(ir_resummation=False), k=eval_k)
-params = load_galaxy_power_spectrum_multipoles_defaults()
-prediction = galaxy_multipoles(basis, params)
+template = PowerSpectrumTemplate(cosmo, z=z, k=support_k, settings=PTSettings(ir_resummation=False))
+theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
+prediction = theory()
 ```
 
 ## Current Scope

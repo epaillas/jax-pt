@@ -14,9 +14,8 @@ from jaxpt import (
     build_linear_input_from_cosmoprimo,
     compute_basis,
     galaxy_multipoles,
-    predict_galaxy_multipoles,
 )
-from jaxpt.theories import load_galaxy_power_spectrum_multipoles_defaults, load_power_spectrum_template_defaults
+from jaxpt.theories import load_galaxy_power_spectrum_multipoles_parameters, load_power_spectrum_template_parameters
 from jaxpt.cosmology import (
     BaseCosmologyProvider,
     ResolvedCosmologyState,
@@ -27,12 +26,12 @@ from jaxpt.cosmology import (
 
 
 def make_bias_params(**overrides: float) -> dict[str, float]:
-    return {**load_galaxy_power_spectrum_multipoles_defaults(), **overrides}
+    return {**load_galaxy_power_spectrum_multipoles_parameters().defaults_dict(), **overrides}
 
 
 def test_power_spectrum_yaml_defaults_load() -> None:
-    cosmology_defaults = load_power_spectrum_template_defaults()
-    nuisance_defaults = load_galaxy_power_spectrum_multipoles_defaults()
+    cosmology_defaults = load_power_spectrum_template_parameters().defaults_dict()
+    nuisance_defaults = load_galaxy_power_spectrum_multipoles_parameters().defaults_dict()
 
     assert cosmology_defaults["omega_cdm"] == 0.12
     assert cosmology_defaults["h"] == 0.6736
@@ -758,53 +757,6 @@ def test_compute_basis_projects_to_requested_k_without_resampling_input() -> Non
         np.asarray(basis.components["rsd_l2_mm_00"]),
         (4.0 * linear_input.growth_rate**2 / 7.0) * np.asarray(basis.components["real_tree_matter"]),
     )
-
-
-def test_predict_galaxy_multipoles_rejects_cosmology_object_source() -> None:
-    z = 0.5
-    cosmo = Class()
-    cosmo.set(
-        {
-            "A_s": 2.089e-9,
-            "n_s": 0.9649,
-            "tau_reio": 0.052,
-            "omega_b": 0.02237,
-            "omega_cdm": 0.12,
-            "h": 0.6736,
-            "YHe": 0.2425,
-            "N_ur": 2.0328,
-            "N_ncdm": 1,
-            "m_ncdm": 0.06,
-            "z_pk": z,
-            "output": "mPk",
-        }
-    )
-    cosmo.compute()
-
-    params = make_bias_params(b2=0.0, bG2=0.0, bGamma3=0.0, cs2=0.0, Pshot=0.0, b4=0.0)
-    with pytest.raises(TypeError, match="Build a LinearPowerInput or PowerSpectrumTemplate"):
-        predict_galaxy_multipoles(cosmo, np.logspace(-3, -1, 8), z, params)
-
-
-def test_predict_galaxy_multipoles_accepts_theory_source() -> None:
-    linear_input = LinearPowerInput(
-        k=np.logspace(-3, -1, 16),
-        pk_linear=np.linspace(100.0, 200.0, 16),
-        z=0.5,
-        growth_factor=0.75,
-        growth_rate=0.8,
-        h=0.7,
-    )
-    params = make_bias_params(b2=0.0, bG2=0.0, bGamma3=0.0, cs2=0.0, Pshot=0.0, b4=0.0)
-    theory = GalaxyPowerSpectrumMultipolesTheory(
-        template=PowerSpectrumTemplate.from_linear_input(linear_input, settings=PTSettings(ir_resummation=False)),
-        k=np.linspace(0.01, 0.08, 8),
-    )
-
-    prediction = predict_galaxy_multipoles(theory, params)
-
-    assert prediction.p0.shape == theory.k.shape
-    assert prediction.metadata["theory"] == "GalaxyPowerSpectrumMultipolesTheory"
 
 
 def test_classpt_reference_theory_uses_template_without_backend_flag() -> None:

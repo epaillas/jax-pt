@@ -11,16 +11,15 @@ from ..cosmology import LinearPowerInput
 from ..parameter import ParameterCollection
 from ..reference.classpt import MultipolePrediction
 from .defaults import (
-    load_galaxy_power_spectrum_multipoles_defaults,
     load_galaxy_power_spectrum_multipoles_parameters,
-    load_power_spectrum_template_defaults,
+    load_power_spectrum_template_parameters,
 )
 
 
-_NUISANCE_DEFAULTS = load_galaxy_power_spectrum_multipoles_defaults()
+_NUISANCE_DEFAULTS = load_galaxy_power_spectrum_multipoles_parameters().defaults_dict()
 _NUISANCE_PARAM_NAMES = tuple(_NUISANCE_DEFAULTS)
 _NUISANCE_PARAMETERS = load_galaxy_power_spectrum_multipoles_parameters()
-_TEMPLATE_DEFAULTS = load_power_spectrum_template_defaults()
+_TEMPLATE_DEFAULTS = load_power_spectrum_template_parameters().defaults_dict()
 _COSMOLOGY_ALIAS_NAMES = {"A_s", "logA", "ln10^10A_s", "h", "H0"}
 _COMMON_COSMOLOGY_PARAM_NAMES = set(_TEMPLATE_DEFAULTS) | _COSMOLOGY_ALIAS_NAMES
 

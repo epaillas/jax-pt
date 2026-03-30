@@ -42,11 +42,3 @@ def load_power_spectrum_template_parameters() -> ParameterCollection:
 
 def load_galaxy_power_spectrum_multipoles_parameters() -> ParameterCollection:
     return _load_yaml_parameters("galaxy_power_spectrum_multipoles.yaml", kind_key="theory")
-
-
-def load_power_spectrum_template_defaults() -> dict[str, float]:
-    return load_power_spectrum_template_parameters().defaults_dict()
-
-
-def load_galaxy_power_spectrum_multipoles_defaults() -> dict[str, float]:
-    return load_galaxy_power_spectrum_multipoles_parameters().defaults_dict()

@@ -6,7 +6,6 @@ from jaxpt import LinearPowerInput, PTSettings, ParameterCollection, TaylorEmula
 from jaxpt.theories import (
     GalaxyPowerSpectrumMultipolesTheory,
     PowerSpectrumTemplate,
-    load_galaxy_power_spectrum_multipoles_defaults,
     load_galaxy_power_spectrum_multipoles_parameters,
     load_power_spectrum_template_parameters,
 )
@@ -60,7 +59,7 @@ def test_theory_without_arguments_uses_default_parameter_configuration() -> None
     )
 
     implicit = theory()
-    explicit = theory(load_galaxy_power_spectrum_multipoles_defaults())
+    explicit = theory(theory.nuisance_parameters.defaults_dict())
 
     np.testing.assert_allclose(implicit.p0, explicit.p0, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(implicit.p2, explicit.p2, rtol=1e-12, atol=1e-12)

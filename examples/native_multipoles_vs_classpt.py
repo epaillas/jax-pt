@@ -17,7 +17,6 @@ from jaxpt.theories import (
     ClassPTGalaxyPowerSpectrumMultipolesTheory,
     GalaxyPowerSpectrumMultipolesTheory,
     PowerSpectrumTemplate,
-    load_galaxy_power_spectrum_multipoles_defaults,
 )
 
 
@@ -72,7 +71,6 @@ def main() -> None:
     args = build_parser().parse_args()
 
     z = 0.5
-    params = load_galaxy_power_spectrum_multipoles_defaults()
 
     cosmo = Class()
     cosmo.set({**FIDUCIAL_COSMOLOGY, **PT_OPTIONS_NOIR, "z_pk": z})
@@ -82,10 +80,12 @@ def main() -> None:
     # backend parity rather than the default native `pk_lin` input convention.
     native_settings = PTSettings(ir_resummation=False)
     native_template = PowerSpectrumTemplate(cosmo, z=z, settings=native_settings, input_recipe="classpt_native_grid_parity")
-    native = GalaxyPowerSpectrumMultipolesTheory(template=native_template, k=EVAL_K)(params)
+    native_theory = GalaxyPowerSpectrumMultipolesTheory(template=native_template, k=EVAL_K)
+    native = native_theory()
 
     classpt_template = PowerSpectrumTemplate(cosmo, z=z, settings=PTSettings(ir_resummation=False))
-    classpt = ClassPTGalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=EVAL_K)(params)
+    classpt_theory = ClassPTGalaxyPowerSpectrumMultipolesTheory(template=classpt_template, k=EVAL_K)
+    classpt = classpt_theory()
 
     spectra = [
         ("P0", np.asarray(native.p0), np.asarray(classpt.p0)),

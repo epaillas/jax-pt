@@ -13,21 +13,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from jaxpt.config import PTSettings
-from jaxpt.theories import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate, load_galaxy_power_spectrum_multipoles_defaults
-
-
-FIDUCIAL_COSMOLOGY = {
-    "A_s": 2.089e-9,
-    "n_s": 0.9649,
-    "tau_reio": 0.052,
-    "omega_b": 0.02237,
-    "omega_cdm": 0.12,
-    "h": 0.6736,
-    "YHe": 0.2425,
-    "N_ur": 2.0328,
-    "N_ncdm": 1,
-    "m_ncdm": 0.06,
-}
+from jaxpt.theories import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate
 
 PT_OPTIONS_NOIR = {
     "output": "mPk",
@@ -37,9 +23,6 @@ PT_OPTIONS_NOIR = {
     "cb": "Yes",
     "RSD": "Yes",
 }
-
-def make_bias_params(**overrides: float) -> dict[str, float]:
-    return {**load_galaxy_power_spectrum_multipoles_defaults(), **overrides}
 
 
 COSMOLOGY_SAMPLES = [
@@ -51,15 +34,15 @@ COSMOLOGY_SAMPLES = [
 NUISANCE_SAMPLES = [
     (
         "fiducial",
-        make_bias_params(),
+        {},
     ),
     (
         "high-bias",
-        make_bias_params(b1=2.2, b2=-0.7, bG2=0.15, bGamma3=-0.05, cs0=5.0, cs2=36.0, cs4=4.0, b4=12.0),
+        {"b1": 2.2, "b2": -0.7, "bG2": 0.15, "bGamma3": -0.05, "cs0": 5.0, "cs2": 36.0, "cs4": 4.0, "b4": 12.0},
     ),
     (
         "lower-shot-noise",
-        make_bias_params(b1=1.85, b2=-1.2, bG2=0.05, bGamma3=-0.15, cs0=-5.0, cs2=24.0, cs4=-3.0, Pshot=2200.0, b4=8.0),
+        {"b1": 1.85, "b2": -1.2, "bG2": 0.05, "bGamma3": -0.15, "cs0": -5.0, "cs2": 24.0, "cs4": -3.0, "Pshot": 2200.0, "b4": 8.0},
     ),
 ]
 
@@ -106,10 +89,6 @@ def format_summary_row(label: str, elapsed_s: float, prediction) -> str:
     )
 
 
-def nuisance_to_kwargs(params: dict[str, float]) -> dict[str, float]:
-    return dict(params)
-
-
 def main() -> None:
     args = build_parser().parse_args()
 
@@ -118,27 +97,19 @@ def main() -> None:
     eval_k = np.linspace(args.kmin, args.kmax, args.nk)
 
     template = PowerSpectrumTemplate(
-        {**FIDUCIAL_COSMOLOGY, **PT_OPTIONS_NOIR},
+        dict(PT_OPTIONS_NOIR),
         z=args.z,
         k=support_k,
         settings=settings,
     )
     theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
 
-    fiducial_nuisance = NUISANCE_SAMPLES[0][1]
-
     cosmology_predictions: list[tuple[str, object]] = []
     cosmology_timings: list[tuple[str, float]] = []
 
     for label, overrides in COSMOLOGY_SAMPLES:
         t0 = time.perf_counter()
-        prediction = theory(
-            **{
-                **FIDUCIAL_COSMOLOGY,
-                **overrides,
-                **nuisance_to_kwargs(fiducial_nuisance),
-            }
-        )
+        prediction = theory(overrides)
         cosmology_timings.append((label, time.perf_counter() - t0))
         cosmology_predictions.append((label, prediction))
 
@@ -148,12 +119,7 @@ def main() -> None:
 
     for label, params in NUISANCE_SAMPLES[1:]:
         t0 = time.perf_counter()
-        prediction = theory(
-            **{
-                **FIDUCIAL_COSMOLOGY,
-                **nuisance_to_kwargs(params),
-            }
-        )
+        prediction = theory(params)
         nuisance_timings.append((label, time.perf_counter() - t0))
         nuisance_predictions.append((label, prediction))
 

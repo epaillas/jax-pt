@@ -4,16 +4,14 @@ This page documents the current execution flow for `jaxpt` power-spectrum predic
 
 The canonical entrypoint is now the theory layer in `jaxpt.theories`, typically
 `GalaxyPowerSpectrumMultipolesTheory(...)` or
-`ClassPTGalaxyPowerSpectrumMultipolesTheory(...)`. The
-`predict_galaxy_multipoles(...)` helper remains as a power-spectrum convenience
-function, but it is no longer the primary interface.
+`ClassPTGalaxyPowerSpectrumMultipolesTheory(...)`.
 
 ```mermaid
 flowchart TD
-    A["GalaxyPowerSpectrumMultipolesTheory(...) or predict_galaxy_multipoles(source, ...)"] --> B{"source type"}
-
-    B -->|"BasisSpectra"| C["galaxy_multipoles(basis, params)"]
-    B -->|"LinearPowerInput"| D["compute_basis(linear_input, settings, k?)"]
+    A["GalaxyPowerSpectrumMultipolesTheory(...) or ClassPTGalaxyPowerSpectrumMultipolesTheory(...)"] --> B["theory(parameters)"]
+    B --> C["template.resolve(cosmology_overrides)"]
+    C -->|"native backend"| D["compute_basis(linear_input, settings, k?)"]
+    C -->|"CLASS-PT backend"| J["predict_classpt_multipoles(...)"]
 
     subgraph Native["Native basis construction"]
         D --> D1{"k override?"}
@@ -48,9 +46,8 @@ flowchart TD
         H --> I["BasisSpectra"]
     end
 
-    I --> C
-
-    C --> K["MultipolePrediction\nP0(k), P2(k), P4(k)"]
+    I --> K["galaxy_multipoles(basis, nuisance_params)"]
+    J --> K["MultipolePrediction\nP0(k), P2(k), P4(k)"]
 ```
 
 Tree-level and one-loop predictions share the same basis-construction pipeline, with `settings.loop_order` switching the loop stages between zeros and the analytic FFTLog-native one-loop terms.
