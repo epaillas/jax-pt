@@ -7,11 +7,13 @@ import time
 
 import matplotlib.pyplot as plt
 import numpy as np
+
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
+from jaxpt.config import PTSettings
+from jaxpt.theories import GalaxyPowerSpectrumMultipolesTheory, PowerSpectrumTemplate, load_galaxy_power_spectrum_multipoles_defaults
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -36,6 +38,10 @@ PT_OPTIONS_NOIR = {
     "RSD": "Yes",
 }
 
+def make_bias_params(**overrides: float) -> dict[str, float]:
+    return {**load_galaxy_power_spectrum_multipoles_defaults(), **overrides}
+
+
 COSMOLOGY_SAMPLES = [
     ("fiducial", {}),
     ("high-omega_cdm", {"omega_cdm": 0.126}),
@@ -45,45 +51,15 @@ COSMOLOGY_SAMPLES = [
 NUISANCE_SAMPLES = [
     (
         "fiducial",
-        EFTBiasParams(
-            b1=2.0,
-            b2=-1.0,
-            bG2=0.1,
-            bGamma3=-0.1,
-            cs0=0.0,
-            cs2=30.0,
-            cs4=0.0,
-            Pshot=3000.0,
-            b4=10.0,
-        ),
+        make_bias_params(),
     ),
     (
         "high-bias",
-        EFTBiasParams(
-            b1=2.2,
-            b2=-0.7,
-            bG2=0.15,
-            bGamma3=-0.05,
-            cs0=5.0,
-            cs2=36.0,
-            cs4=4.0,
-            Pshot=3000.0,
-            b4=12.0,
-        ),
+        make_bias_params(b1=2.2, b2=-0.7, bG2=0.15, bGamma3=-0.05, cs0=5.0, cs2=36.0, cs4=4.0, b4=12.0),
     ),
     (
         "lower-shot-noise",
-        EFTBiasParams(
-            b1=1.85,
-            b2=-1.2,
-            bG2=0.05,
-            bGamma3=-0.15,
-            cs0=-5.0,
-            cs2=24.0,
-            cs4=-3.0,
-            Pshot=2200.0,
-            b4=8.0,
-        ),
+        make_bias_params(b1=1.85, b2=-1.2, bG2=0.05, bGamma3=-0.15, cs0=-5.0, cs2=24.0, cs4=-3.0, Pshot=2200.0, b4=8.0),
     ),
 ]
 
@@ -115,28 +91,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     return parser
 
-def predict_with_theory_api(
-    cosmology: dict[str, float],
-    nuisance: EFTBiasParams,
-    *,
-    z: float,
-    support_k: np.ndarray,
-    eval_k: np.ndarray,
-    settings: PTSettings,
-):
-    # Build a queryable template once from the fiducial cosmology defaults.
-    # Each theory call may then update both cosmology and nuisance parameters
-    # through one flat query surface.
-    template = PowerSpectrumTemplate(
-        {**cosmology, **PT_OPTIONS_NOIR},
-        z=z,
-        k=support_k,
-        settings=settings,
-    )
-    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
-    prediction = theory(**{**cosmology, **{name: getattr(nuisance, name) for name in nuisance.__slots__}})
-    return prediction, template, theory
-
 
 def fractional_delta(values: np.ndarray, reference: np.ndarray) -> np.ndarray:
     return (values - reference) / np.maximum(np.abs(reference), 1.0)
@@ -152,12 +106,24 @@ def format_summary_row(label: str, elapsed_s: float, prediction) -> str:
     )
 
 
+def nuisance_to_kwargs(params: dict[str, float]) -> dict[str, float]:
+    return dict(params)
+
+
 def main() -> None:
     args = build_parser().parse_args()
 
     settings = PTSettings(ir_resummation=False)
     support_k = np.logspace(-5.0, 1.0, args.support_nk)
     eval_k = np.linspace(args.kmin, args.kmax, args.nk)
+
+    template = PowerSpectrumTemplate(
+        {**FIDUCIAL_COSMOLOGY, **PT_OPTIONS_NOIR},
+        z=args.z,
+        k=support_k,
+        settings=settings,
+    )
+    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
 
     fiducial_nuisance = NUISANCE_SAMPLES[0][1]
 
@@ -166,44 +132,37 @@ def main() -> None:
 
     for label, overrides in COSMOLOGY_SAMPLES:
         t0 = time.perf_counter()
-        prediction, _, _ = predict_with_theory_api(
-            {**FIDUCIAL_COSMOLOGY, **overrides},
-            fiducial_nuisance,
-            z=args.z,
-            support_k=support_k,
-            eval_k=eval_k,
-            settings=settings,
+        prediction = theory(
+            **{
+                **FIDUCIAL_COSMOLOGY,
+                **overrides,
+                **nuisance_to_kwargs(fiducial_nuisance),
+            }
         )
         cosmology_timings.append((label, time.perf_counter() - t0))
         cosmology_predictions.append((label, prediction))
 
-    # When cosmology is fixed, the queryable template reuses the last
-    # cosmology-dependent state and only nuisance parameters vary between calls.
-    fiducial_template = PowerSpectrumTemplate(
-        {**FIDUCIAL_COSMOLOGY, **PT_OPTIONS_NOIR},
-        z=args.z,
-        k=support_k,
-        settings=settings,
-    )
-    fiducial_theory = GalaxyPowerSpectrumMultipolesTheory(template=fiducial_template, k=eval_k)
-    fiducial_prediction = fiducial_theory(
-        **{**FIDUCIAL_COSMOLOGY, **{name: getattr(fiducial_nuisance, name) for name in fiducial_nuisance.__slots__}}
-    )
+    fiducial_prediction = cosmology_predictions[0][1]
     nuisance_predictions: list[tuple[str, object]] = [("fiducial", fiducial_prediction)]
     nuisance_timings: list[tuple[str, float]] = [("fiducial", 0.0)]
 
     for label, params in NUISANCE_SAMPLES[1:]:
         t0 = time.perf_counter()
-        prediction = fiducial_theory(**{**FIDUCIAL_COSMOLOGY, **{name: getattr(params, name) for name in params.__slots__}})
+        prediction = theory(
+            **{
+                **FIDUCIAL_COSMOLOGY,
+                **nuisance_to_kwargs(params),
+            }
+        )
         nuisance_timings.append((label, time.perf_counter() - t0))
         nuisance_predictions.append((label, prediction))
 
-    print("Cosmology-varying loop: rebuild the cosmology-dependent template state through one flat theory query")
+    print("Cosmology-varying loop: reuse one theory object and update cosmology through flat query parameters")
     for (label, elapsed), (_, prediction) in zip(cosmology_timings, cosmology_predictions, strict=True):
         print(format_summary_row(label, elapsed, prediction))
 
     print()
-    print("Nuisance-only loop: reuse the last cosmology state and vary only nuisance parameters")
+    print("Nuisance-only loop: keep cosmology fixed and vary only nuisance parameters on the same theory object")
     for (label, elapsed), (_, prediction) in zip(nuisance_timings, nuisance_predictions, strict=True):
         print(format_summary_row(label, elapsed, prediction))
 

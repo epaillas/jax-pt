@@ -16,6 +16,7 @@ dependencies = [
   "jax>=0.4.28",
   "jaxlib>=0.4.28",
   "numpy>=1.26",
+  "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -29,6 +30,9 @@ include-package-data = true
 
 [tool.setuptools.packages.find]
 include = ["jaxpt*"]
+
+[tool.setuptools.package-data]
+"jaxpt.theories" = ["*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

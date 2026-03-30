@@ -4,19 +4,6 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)
-class EFTBiasParams:
-    b1: float
-    b2: float
-    bG2: float
-    bGamma3: float
-    cs0: float
-    cs2: float
-    cs4: float
-    Pshot: float
-    b4: float
-
-
-@dataclass(frozen=True, slots=True)
 class PTSettings:
     backend: str = "native"
     loop_order: str = "one_loop"

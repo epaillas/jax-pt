@@ -5,7 +5,6 @@ from cosmoprimo import Cosmology
 
 from jaxpt import (
     ClassPTGalaxyPowerSpectrumMultipolesTheory,
-    EFTBiasParams,
     GalaxyPowerSpectrumMultipolesTheory,
     LinearPowerInput,
     PowerSpectrumTemplate,
@@ -29,7 +28,7 @@ from jaxpt.kernels.rsd_spectral import compute_native_rsd_terms
 from jaxpt.kernels.spectral import compute_native_realspace_terms_from_preprocessed
 from jaxpt.reference.classpt import BasisSpectra, MultipolePrediction, PK_MULT_INDEX
 
-from conftest import DEFAULT_PT_OPTIONS, DEFAULT_PT_OPTIONS_NOIR, FIDUCIAL_COSMOLOGY, SHIFTED_COSMOLOGY
+from conftest import DEFAULT_PT_OPTIONS, DEFAULT_PT_OPTIONS_NOIR, FIDUCIAL_COSMOLOGY, SHIFTED_COSMOLOGY, make_bias_params
 
 
 class MockClassPT:
@@ -118,24 +117,14 @@ def test_galaxy_multipoles_match_classpt_formula_surface() -> None:
     pk_mult[-1] = k
 
     cosmo = MockClassPT(pk_mult=pk_mult, h=h, fz=fz)
-    params = EFTBiasParams(
-        b1=2.0,
-        b2=-1.0,
-        bG2=0.1,
-        bGamma3=-0.1,
-        cs0=0.0,
-        cs2=30.0,
-        cs4=0.0,
-        Pshot=3000.0,
-        b4=10.0,
-    )
+    params = make_bias_params()
 
     basis = make_mock_basis(pk_mult=pk_mult, k=k, z=z, h=h, fz=fz)
     prediction = galaxy_multipoles(basis, params)
 
-    expected_p0 = cosmo.pk_gg_l0(params.b1, params.b2, params.bG2, params.bGamma3, params.cs0, params.Pshot, params.b4)
-    expected_p2 = cosmo.pk_gg_l2(params.b1, params.b2, params.bG2, params.bGamma3, params.cs2, params.b4)
-    expected_p4 = cosmo.pk_gg_l4(params.b1, params.b2, params.bG2, params.bGamma3, params.cs4, params.b4)
+    expected_p0 = cosmo.pk_gg_l0(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs0"], params["Pshot"], params["b4"])
+    expected_p2 = cosmo.pk_gg_l2(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs2"], params["b4"])
+    expected_p4 = cosmo.pk_gg_l4(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs4"], params["b4"])
 
     np.testing.assert_allclose(np.asarray(prediction.p0), expected_p0, rtol=1e-12, atol=1e-12)
     np.testing.assert_allclose(np.asarray(prediction.p2), expected_p2, rtol=1e-12, atol=1e-12)
@@ -168,22 +157,17 @@ def test_live_classpt_parity_for_galaxy_multipoles(benchmark_k: np.ndarray, cosm
     cosmo.set({**cosmology, **DEFAULT_PT_OPTIONS, "z_pk": z})
     cosmo.compute()
 
-    params = EFTBiasParams(
+    params = make_bias_params(
         b1=2.0 if z < 0.75 else 1.7,
         b2=-1.0 if z < 0.75 else -0.4,
-        bG2=0.1,
-        bGamma3=-0.1,
-        cs0=0.0,
-        cs2=30.0,
-        cs4=0.0,
         Pshot=3000.0 if z < 0.75 else 1800.0,
         b4=10.0 if z < 0.75 else 6.0,
     )
 
     cosmo.initialize_output(benchmark_k, z, len(benchmark_k))
-    expected_p0 = cosmo.pk_gg_l0(params.b1, params.b2, params.bG2, params.bGamma3, params.cs0, params.Pshot, params.b4)
-    expected_p2 = cosmo.pk_gg_l2(params.b1, params.b2, params.bG2, params.bGamma3, params.cs2, params.b4)
-    expected_p4 = cosmo.pk_gg_l4(params.b1, params.b2, params.bG2, params.bGamma3, params.cs4, params.b4)
+    expected_p0 = cosmo.pk_gg_l0(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs0"], params["Pshot"], params["b4"])
+    expected_p2 = cosmo.pk_gg_l2(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs2"], params["b4"])
+    expected_p4 = cosmo.pk_gg_l4(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs4"], params["b4"])
     prediction = MultipolePrediction(
         k=benchmark_k,
         p0=expected_p0,
@@ -205,7 +189,7 @@ def test_predict_galaxy_multipoles_accepts_linear_input(benchmark_k: np.ndarray)
     cosmo.compute()
 
     linear_input = build_linear_input_from_classy(cosmo, z=z, k=benchmark_k)
-    params = EFTBiasParams(b1=2.0, b2=0.0, bG2=0.0, bGamma3=0.0, cs0=0.0, cs2=0.0, cs4=0.0, Pshot=0.0, b4=0.0)
+    params = make_bias_params(b2=0.0, bG2=0.0, bGamma3=0.0, cs2=0.0, Pshot=0.0, b4=0.0)
 
     prediction = predict_galaxy_multipoles(linear_input, params, settings=PTSettings(ir_resummation=False))
 
@@ -220,14 +204,14 @@ def test_predict_galaxy_multipoles_accepts_classpt_backend_from_linear_input(ben
     cosmo.compute()
 
     linear_input = build_linear_input_from_classy(cosmo, z=z, k=benchmark_k)
-    params = EFTBiasParams(b1=2.0, b2=-1.0, bG2=0.1, bGamma3=-0.1, cs0=0.0, cs2=30.0, cs4=0.0, Pshot=3000.0, b4=10.0)
+    params = make_bias_params()
 
     prediction = predict_galaxy_multipoles(linear_input, params, settings=PTSettings(backend="classpt", ir_resummation=False))
 
     cosmo.initialize_output(benchmark_k, z, len(benchmark_k))
-    expected_p0 = np.asarray(cosmo.pk_gg_l0(params.b1, params.b2, params.bG2, params.bGamma3, params.cs0, params.Pshot, params.b4))
-    expected_p2 = np.asarray(cosmo.pk_gg_l2(params.b1, params.b2, params.bG2, params.bGamma3, params.cs2, params.b4))
-    expected_p4 = np.asarray(cosmo.pk_gg_l4(params.b1, params.b2, params.bG2, params.bGamma3, params.cs4, params.b4))
+    expected_p0 = np.asarray(cosmo.pk_gg_l0(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs0"], params["Pshot"], params["b4"]))
+    expected_p2 = np.asarray(cosmo.pk_gg_l2(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs2"], params["b4"]))
+    expected_p4 = np.asarray(cosmo.pk_gg_l4(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs4"], params["b4"]))
 
     np.testing.assert_allclose(np.asarray(prediction.p0), expected_p0)
     np.testing.assert_allclose(np.asarray(prediction.p2), expected_p2)
@@ -252,7 +236,7 @@ def test_classpt_backend_requires_live_classy_cosmology(benchmark_k: np.ndarray)
 
 def test_native_and_classpt_theory_share_high_level_api(benchmark_k: np.ndarray) -> None:
     z = 0.5
-    params = EFTBiasParams(b1=2.0, b2=-1.0, bG2=0.1, bGamma3=-0.1, cs0=0.0, cs2=30.0, cs4=0.0, Pshot=3000.0, b4=10.0)
+    params = make_bias_params()
 
     cosmo = Class()
     cosmo.set({**FIDUCIAL_COSMOLOGY, **DEFAULT_PT_OPTIONS_NOIR, "output": "mTk,mPk", "z_pk": z})
@@ -343,17 +327,7 @@ def test_native_grid_parity_input_reduces_live_classpt_multipole_mismatch() -> N
     z = 0.5
     eval_k = np.linspace(0.01, 0.2, 64)
     settings = PTSettings(ir_resummation=False)
-    params = EFTBiasParams(
-        b1=2.0,
-        b2=-1.0,
-        bG2=0.1,
-        bGamma3=-0.1,
-        cs0=0.0,
-        cs2=30.0,
-        cs4=0.0,
-        Pshot=3000.0,
-        b4=10.0,
-    )
+    params = make_bias_params()
 
     cosmo = Class()
     cosmo.set({**FIDUCIAL_COSMOLOGY, **DEFAULT_PT_OPTIONS_NOIR, "output": "mTk,mPk", "z_pk": z})
@@ -361,9 +335,9 @@ def test_native_grid_parity_input_reduces_live_classpt_multipole_mismatch() -> N
     cosmo.initialize_output(eval_k, z, len(eval_k))
 
     reference = [
-        np.asarray(cosmo.pk_gg_l0(params.b1, params.b2, params.bG2, params.bGamma3, params.cs0, params.Pshot, params.b4)),
-        np.asarray(cosmo.pk_gg_l2(params.b1, params.b2, params.bG2, params.bGamma3, params.cs2, params.b4)),
-        np.asarray(cosmo.pk_gg_l4(params.b1, params.b2, params.bG2, params.bGamma3, params.cs4, params.b4)),
+        np.asarray(cosmo.pk_gg_l0(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs0"], params["Pshot"], params["b4"])),
+        np.asarray(cosmo.pk_gg_l2(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs2"], params["b4"])),
+        np.asarray(cosmo.pk_gg_l4(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs4"], params["b4"])),
     ]
 
     coarse_input = build_classpt_parity_linear_input_from_classy(cosmo, z=z, k=np.logspace(-5.0, 1.0, 256))
@@ -513,19 +487,19 @@ def test_native_one_loop_basis_has_same_contract_for_plain_and_class_inputs() ->
         (
             FIDUCIAL_COSMOLOGY,
             0.5,
-            EFTBiasParams(b1=2.0, b2=-1.0, bG2=0.1, bGamma3=-0.1, cs0=0.0, cs2=30.0, cs4=0.0, Pshot=3000.0, b4=10.0),
+            make_bias_params(),
         ),
         (
             SHIFTED_COSMOLOGY,
             1.0,
-            EFTBiasParams(b1=1.7, b2=-0.4, bG2=0.1, bGamma3=-0.1, cs0=0.0, cs2=25.0, cs4=0.0, Pshot=1800.0, b4=6.0),
+            make_bias_params(b1=1.7, b2=-0.4, cs2=25.0, Pshot=1800.0, b4=6.0),
         ),
     ],
 )
 def test_native_one_loop_multipoles_match_classpt_on_plot_range(
     cosmology: dict[str, float],
     z: float,
-    params: EFTBiasParams,
+    params: dict[str, float],
 ) -> None:
     eval_k = np.linspace(0.01, 0.2, 32)
     linear_k = np.logspace(-5.0, 1.0, 256)
@@ -539,9 +513,9 @@ def test_native_one_loop_multipoles_match_classpt_on_plot_range(
     prediction = galaxy_multipoles(basis, params)
 
     cosmo.initialize_output(eval_k, z, len(eval_k))
-    expected_p0 = np.asarray(cosmo.pk_gg_l0(params.b1, params.b2, params.bG2, params.bGamma3, params.cs0, params.Pshot, params.b4))
-    expected_p2 = np.asarray(cosmo.pk_gg_l2(params.b1, params.b2, params.bG2, params.bGamma3, params.cs2, params.b4))
-    expected_p4 = np.asarray(cosmo.pk_gg_l4(params.b1, params.b2, params.bG2, params.bGamma3, params.cs4, params.b4))
+    expected_p0 = np.asarray(cosmo.pk_gg_l0(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs0"], params["Pshot"], params["b4"]))
+    expected_p2 = np.asarray(cosmo.pk_gg_l2(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs2"], params["b4"]))
+    expected_p4 = np.asarray(cosmo.pk_gg_l4(params["b1"], params["b2"], params["bG2"], params["bGamma3"], params["cs4"], params["b4"]))
 
     rel_p0 = np.abs(np.asarray(prediction.p0) - expected_p0) / np.maximum(np.abs(expected_p0), 1.0)
     rel_p2 = np.abs(np.asarray(prediction.p2) - expected_p2) / np.maximum(np.abs(expected_p2), 1.0)
@@ -757,7 +731,7 @@ def test_galaxy_multipoles_accepts_plain_native_one_loop_rsd_basis() -> None:
         growth_rate=0.8,
         h=0.7,
     )
-    params = EFTBiasParams(b1=2.0, b2=-1.0, bG2=0.1, bGamma3=-0.1, cs0=0.0, cs2=30.0, cs4=0.0, Pshot=3000.0, b4=10.0)
+    params = make_bias_params()
 
     basis = compute_basis(linear_input, settings=PTSettings(ir_resummation=False))
     prediction = galaxy_multipoles(basis, params)

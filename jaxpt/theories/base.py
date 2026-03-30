@@ -1,56 +1,34 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, fields
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 
-from ..config import EFTBiasParams, PTSettings
+from ..config import PTSettings
 from ..cosmology import LinearPowerInput
 from ..reference.classpt import MultipolePrediction
+from .defaults import load_galaxy_power_spectrum_multipoles_defaults, load_power_spectrum_template_defaults
 
 
-_EFT_PARAM_NAMES = tuple(param.name for param in fields(EFTBiasParams))
+_NUISANCE_DEFAULTS = load_galaxy_power_spectrum_multipoles_defaults()
+_NUISANCE_PARAM_NAMES = tuple(_NUISANCE_DEFAULTS)
+_TEMPLATE_DEFAULTS = load_power_spectrum_template_defaults()
 _COSMOLOGY_ALIAS_NAMES = {"A_s", "logA", "ln10^10A_s", "h", "H0"}
-_COMMON_COSMOLOGY_PARAM_NAMES = {
-    "A_s",
-    "logA",
-    "ln10^10A_s",
-    "h",
-    "H0",
-    "n_s",
-    "tau_reio",
-    "omega_b",
-    "omega_cdm",
-    "N_ur",
-    "N_ncdm",
-    "m_ncdm",
-    "YHe",
-    "Omega_k",
-    "w0_fld",
-    "wa_fld",
-}
-
-
-def _eft_params_as_dict(params: EFTBiasParams) -> dict[str, float]:
-    return {name: float(getattr(params, name)) for name in _EFT_PARAM_NAMES}
+_COMMON_COSMOLOGY_PARAM_NAMES = set(_TEMPLATE_DEFAULTS) | _COSMOLOGY_ALIAS_NAMES
 
 
 def normalize_flat_query(
-    parameters: EFTBiasParams | Mapping[str, float] | None,
+    parameters: Mapping[str, float] | None,
     kwargs: Mapping[str, float],
 ) -> dict[str, float]:
     if parameters is None:
         base: dict[str, float] = {}
-    elif isinstance(parameters, EFTBiasParams):
-        base = _eft_params_as_dict(parameters)
     elif isinstance(parameters, Mapping):
         base = {str(name): float(value) for name, value in parameters.items()}
     else:
-        raise TypeError(
-            "Theory parameters must be provided as an EFTBiasParams instance, a mapping, or flat keyword arguments."
-        )
+        raise TypeError("Theory parameters must be provided as a mapping or flat keyword arguments.")
 
     overlap = sorted(set(base) & set(kwargs))
     if overlap:
@@ -60,17 +38,22 @@ def normalize_flat_query(
     return base
 
 
-def normalize_nuisance_params(parameters: Mapping[str, float]) -> EFTBiasParams:
-    extra = sorted(set(parameters) - set(_EFT_PARAM_NAMES))
-    missing = [name for name in _EFT_PARAM_NAMES if name not in parameters]
-    if missing or extra:
-        parts: list[str] = []
-        if missing:
-            parts.append(f"missing required parameters: {', '.join(missing)}")
-        if extra:
-            parts.append(f"unexpected parameters: {', '.join(extra)}")
-        raise ValueError("; ".join(parts))
-    return EFTBiasParams(**{name: float(parameters[name]) for name in _EFT_PARAM_NAMES})
+def normalize_nuisance_params(
+    parameters: Mapping[str, float],
+    *,
+    defaults: Mapping[str, float] | None = None,
+) -> dict[str, float]:
+    allowed = set(_NUISANCE_PARAM_NAMES)
+    extra = sorted(set(parameters) - allowed)
+    merged = dict(_NUISANCE_DEFAULTS if defaults is None else defaults)
+    if extra:
+        raise ValueError(f"unexpected parameters: {', '.join(extra)}")
+    for name, value in parameters.items():
+        merged[name] = float(value)
+    missing = [name for name in _NUISANCE_PARAM_NAMES if name not in merged]
+    if missing:
+        raise ValueError(f"missing required parameters: {', '.join(missing)}")
+    return {name: float(merged[name]) for name in _NUISANCE_PARAM_NAMES}
 
 
 def finalize_multipole_prediction(
@@ -93,11 +76,12 @@ def finalize_multipole_prediction(
 
 class CosmologyQueryMixin:
     template: Any
+    nuisance_defaults: Mapping[str, float]
 
-    def _split_query(self, query: Mapping[str, float]) -> tuple[EFTBiasParams, dict[str, float]]:
+    def _split_query(self, query: Mapping[str, float]) -> tuple[dict[str, float], dict[str, float]]:
         nuisance, cosmology, unknown = {}, {}, []
         for name, value in query.items():
-            if name in _EFT_PARAM_NAMES:
+            if name in self.nuisance_defaults:
                 nuisance[name] = value
             elif self.template.is_queryable and name in self.template.cosmology_param_names:
                 cosmology[name] = value
@@ -109,7 +93,7 @@ class CosmologyQueryMixin:
                 unknown.append(name)
         if unknown:
             raise ValueError(f"unexpected parameters: {', '.join(sorted(unknown))}")
-        return normalize_nuisance_params(nuisance), cosmology
+        return normalize_nuisance_params(nuisance, defaults=self.nuisance_defaults), cosmology
 
 
 @dataclass(slots=True)

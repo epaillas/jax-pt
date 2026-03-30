@@ -12,7 +12,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import PTSettings, build_linear_input_from_classy, compute_basis, galaxy_real_spectrum
+from jaxpt.bias import galaxy_real_spectrum
+from jaxpt.config import PTSettings
+from jaxpt.cosmology import build_linear_input_from_classy
+from jaxpt.native import compute_basis
 
 
 FIDUCIAL_COSMOLOGY = {

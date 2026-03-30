@@ -1,0 +1,11 @@
+theory: galaxy_power_spectrum_multipoles
+parameters:
+  b1: 2.0
+  b2: -1.0
+  bG2: 0.1
+  bGamma3: -0.1
+  cs0: 0.0
+  cs2: 30.0
+  cs4: 0.0
+  Pshot: 3000.0
+  b4: 10.0

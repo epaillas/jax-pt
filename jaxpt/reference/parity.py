@@ -1,10 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
-
-from ..config import EFTBiasParams
 from .classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
 
 
@@ -25,7 +24,7 @@ def compare_predictions(lhs: MultipolePrediction, rhs: MultipolePrediction) -> d
 def compare_multipoles_to_classpt(
     prediction: MultipolePrediction,
     cosmo: Any,
-    params: EFTBiasParams,
+    params: Mapping[str, float],
 ) -> dict[str, dict[str, float]]:
     k = np.asarray(prediction.k, dtype=float)
     z = float(prediction.metadata["z"])

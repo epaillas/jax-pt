@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import EFTBiasParams
+from jaxpt.theories import load_galaxy_power_spectrum_multipoles_defaults
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -47,6 +47,10 @@ DEFAULT_PT_OPTIONS_NOIR = {
 }
 
 
+def make_bias_params(**overrides: float) -> dict[str, float]:
+    return {**load_galaxy_power_spectrum_multipoles_defaults(), **overrides}
+
+
 @pytest.fixture
 def benchmark_k() -> np.ndarray:
     return np.logspace(-3, -0.1, 48)
@@ -65,7 +69,7 @@ def benchmark_cosmology(request) -> dict[str, float]:
 
 
 @pytest.fixture(params=["low_bias", "high_bias"])
-def benchmark_params(request) -> EFTBiasParams:
+def benchmark_params(request) -> dict[str, float]:
     if request.param == "low_bias":
-        return EFTBiasParams(b1=1.7, b2=-0.4, bG2=0.1, bGamma3=-0.1, cs0=0.0, cs2=25.0, cs4=0.0, Pshot=1800.0, b4=6.0)
-    return EFTBiasParams(b1=2.2, b2=-1.2, bG2=0.2, bGamma3=-0.15, cs0=0.0, cs2=35.0, cs4=0.0, Pshot=3200.0, b4=10.0)
+        return make_bias_params(b1=1.7, b2=-0.4, cs2=25.0, Pshot=1800.0, b4=6.0)
+    return make_bias_params(b1=2.2, b2=-1.2, bG2=0.2, bGamma3=-0.15, cs2=35.0, Pshot=3200.0, b4=10.0)

@@ -13,7 +13,13 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from jaxpt import ClassPTGalaxyPowerSpectrumMultipolesTheory, EFTBiasParams, GalaxyPowerSpectrumMultipolesTheory, PTSettings, PowerSpectrumTemplate
+from jaxpt.config import PTSettings
+from jaxpt.theories import (
+    ClassPTGalaxyPowerSpectrumMultipolesTheory,
+    GalaxyPowerSpectrumMultipolesTheory,
+    PowerSpectrumTemplate,
+    load_galaxy_power_spectrum_multipoles_defaults,
+)
 
 
 FIDUCIAL_COSMOLOGY = {
@@ -67,17 +73,7 @@ def main() -> None:
     args = build_parser().parse_args()
 
     z = 0.5
-    params = EFTBiasParams(
-        b1=2.0,
-        b2=-1.0,
-        bG2=0.1,
-        bGamma3=-0.1,
-        cs0=0.0,
-        cs2=30.0,
-        cs4=0.0,
-        Pshot=3000.0,
-        b4=10.0,
-    )
+    params = load_galaxy_power_spectrum_multipoles_defaults()
 
     cosmoprimo_cosmo = Cosmology(
         engine="class",

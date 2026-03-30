@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..bias import galaxy_multipoles
-from ..config import EFTBiasParams, PTSettings
+from ..config import PTSettings
 from ..cosmology import (
     BaseCosmologyProvider,
     ClassyCosmologyProvider,
@@ -18,6 +18,10 @@ from ..cosmology import (
 from ..native import compute_basis
 from ..reference.classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
 from .base import BasePowerSpectrumTheory, finalize_multipole_prediction, normalize_flat_query
+from .defaults import load_galaxy_power_spectrum_multipoles_defaults, load_power_spectrum_template_defaults
+
+
+_TEMPLATE_DEFAULTS = load_power_spectrum_template_defaults()
 
 
 def _is_cosmoprimo_cosmology(source: Any) -> bool:
@@ -44,6 +48,7 @@ def _build_provider(
     if _is_cosmoprimo_cosmology(source):
         return CosmoprimoCosmologyProvider.from_cosmology(source)
     if isinstance(source, Mapping):
+        source = {**_TEMPLATE_DEFAULTS, **{str(name): float(value) for name, value in source.items()}}
         if provider is None:
             provider = "classy"
         if provider == "classy":
@@ -110,6 +115,10 @@ class PowerSpectrumTemplate:
         return self.resolve({}).linear_input
 
     @property
+    def default_cosmology(self) -> dict[str, float]:
+        return dict(_TEMPLATE_DEFAULTS)
+
+    @property
     def cosmology_param_names(self) -> set[str]:
         if self._cosmology_provider is None:
             return set()
@@ -152,6 +161,7 @@ class PowerSpectrumTemplate:
 
 @dataclass(slots=True)
 class GalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
+    nuisance_defaults: dict[str, float] = field(default_factory=load_galaxy_power_spectrum_multipoles_defaults)
     _basis: BasisSpectra | None = field(init=False, default=None, repr=False)
     _basis_query_key: tuple[tuple[str, Any], ...] | None = field(init=False, default=None, repr=False)
 
@@ -165,7 +175,7 @@ class GalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
 
     def __call__(
         self,
-        parameters: EFTBiasParams | Mapping[str, float] | None = None,
+        parameters: Mapping[str, float] | None = None,
         *,
         return_components: bool | None = None,
         **kwargs: float,
@@ -210,6 +220,8 @@ class GalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
 
 @dataclass(slots=True)
 class ClassPTGalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
+    nuisance_defaults: dict[str, float] = field(default_factory=load_galaxy_power_spectrum_multipoles_defaults)
+
     def __post_init__(self) -> None:
         BasePowerSpectrumTheory.__post_init__(self)
         if not self.template.is_queryable and self.template.linear_input.metadata.get("_classpt_cosmo") is None:
@@ -217,7 +229,7 @@ class ClassPTGalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
 
     def __call__(
         self,
-        parameters: EFTBiasParams | Mapping[str, float] | None = None,
+        parameters: Mapping[str, float] | None = None,
         *,
         return_components: bool | None = None,
         **kwargs: float,
@@ -249,7 +261,7 @@ class ClassPTGalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
 def predict_galaxy_multipoles(
     source,
     *args,
-    params: EFTBiasParams | None = None,
+    params: Mapping[str, float] | None = None,
     settings: PTSettings | None = None,
     return_components: bool = False,
     **kwargs,
