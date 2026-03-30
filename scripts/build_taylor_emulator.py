@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
 
 import numpy as np
 
-from jaxpt import PTSettings, build_multipole_emulator
+from jaxpt import PTSettings, build_multipole_emulator, repo_cache_dir
 from jaxpt.theories import (
     GalaxyPowerSpectrumMultipolesTheory,
     PowerSpectrumTemplate,
@@ -62,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(__file__).with_name("emulator_outputs"),
+        default=repo_cache_dir("emulators"),
         help="Directory where the hashed emulator artifact will be saved.",
     )
     parser.add_argument("--force", action="store_true", help="Rebuild even if the hashed emulator file already exists.")

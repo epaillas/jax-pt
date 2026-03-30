@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
-from jaxpt.utils import covariance_errors, flatten_pgg_measurements, load_pgg_data_vector, load_pgg_mock_matrix, sample_covariance
+from jaxpt.utils import cached_sample_covariance, covariance_errors, flatten_pgg_measurements, load_pgg_data_vector, load_pgg_mock_matrix, sample_covariance
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -62,6 +62,39 @@ def test_sample_covariance_and_errors_have_expected_shapes(tmp_path: Path) -> No
     assert np.all(errors >= 0.0)
 
 
+def test_cached_sample_covariance_reuses_hashed_artifact(tmp_path: Path) -> None:
+    k_data, _ = load_pgg_data_vector(DATA_VECTOR_PATH, ells=(0, 2, 4), rebin=13, kmin=0.01, kmax=0.2)
+    mock_dir = _build_small_mock_directory(tmp_path)
+    cache_dir = tmp_path / "cache"
+
+    k_first, covariance_first, cache_path = cached_sample_covariance(
+        mock_dir,
+        ells=(0, 2, 4),
+        rebin=13,
+        k_data=k_data,
+        kmin=0.01,
+        kmax=0.2,
+        cache_dir=cache_dir,
+    )
+    assert cache_path.exists()
+    mtime_first = cache_path.stat().st_mtime_ns
+
+    k_second, covariance_second, cache_path_second = cached_sample_covariance(
+        mock_dir,
+        ells=(0, 2, 4),
+        rebin=13,
+        k_data=k_data,
+        kmin=0.01,
+        kmax=0.2,
+        cache_dir=cache_dir,
+    )
+
+    assert cache_path_second == cache_path
+    assert cache_path_second.stat().st_mtime_ns == mtime_first
+    np.testing.assert_allclose(k_second, k_first, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(covariance_second, covariance_first, rtol=0.0, atol=0.0)
+
+
 def test_plot_simulation_script_writes_png(tmp_path: Path) -> None:
     mock_dir = _build_small_mock_directory(tmp_path)
     output_path = tmp_path / "measurements.png"
@@ -88,6 +121,7 @@ def test_plot_simulation_script_writes_png(tmp_path: Path) -> None:
     )
 
     assert "covariance_shape" in result.stdout
+    assert "covariance_cache:" in result.stdout
     assert output_path.exists()
     assert output_path.stat().st_size > 0
 
@@ -114,5 +148,6 @@ def test_plot_simulation_script_writes_png_with_default_k_range(tmp_path: Path) 
     )
 
     assert "n_k" in result.stdout
+    assert "covariance_cache:" in result.stdout
     assert output_path.exists()
     assert output_path.stat().st_size > 0

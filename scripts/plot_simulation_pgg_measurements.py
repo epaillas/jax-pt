@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from jaxpt.utils import covariance_errors, flatten_pgg_measurements, load_pgg_data_vector, load_pgg_mock_matrix, sample_covariance
+from jaxpt.utils import cached_sample_covariance, covariance_errors, flatten_pgg_measurements, load_pgg_data_vector, repo_cache_dir
 
 
 DEFAULT_DATA_PATH = ROOT / "data" / "data_vector" / "mesh2_spectrum_poles_c000_hod006.h5"
@@ -47,6 +47,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=ROOT / "scripts" / "simulation_pgg_measurements.png",
         help="Path to the output PNG.",
+    )
+    parser.add_argument(
+        "--covariance-cache-dir",
+        type=Path,
+        default=repo_cache_dir("covariances"),
+        help="Directory where hashed covariance artifacts are stored.",
     )
     parser.add_argument("--show", action="store_true", help="Display the plot interactively after writing the PNG.")
     return parser
@@ -80,15 +86,15 @@ def _plot_measurements(
     for ax, ell in zip(axes_array, ells):
         ax.errorbar(
             k,
-            np.asarray(poles[ell], dtype=float),
-            yerr=np.asarray(pole_errors[ell], dtype=float),
+            k * np.asarray(poles[ell], dtype=float),
+            yerr=k * np.asarray(pole_errors[ell], dtype=float),
             fmt="o",
             ms=3.5,
             lw=1.2,
             capsize=2.0,
         )
         ax.set_title(f"P{ell}")
-        ax.set_ylabel(rf"$P_{{{ell}}}(k)$")
+        ax.set_ylabel(rf"$ k P_{{{ell}}}(k) $ [$(\mathrm{{Mpc}}/h)^2$]")
         ax.grid(True, alpha=0.25)
 
     axes_array[-1].set_xlabel("k [1/Mpc]")
@@ -108,15 +114,15 @@ def main() -> None:
     ells = tuple(int(ell) for ell in args.ells)
 
     k, poles = load_pgg_data_vector(args.data, ells=ells, rebin=args.rebin, kmin=args.kmin, kmax=args.kmax)
-    _, mock_matrix = load_pgg_mock_matrix(
+    _, covariance, covariance_cache_path = cached_sample_covariance(
         args.mocks,
         ells=ells,
         rebin=args.rebin,
         k_data=k,
         kmin=args.kmin,
         kmax=args.kmax,
+        cache_dir=args.covariance_cache_dir,
     )
-    covariance = sample_covariance(mock_matrix)
     errors = covariance_errors(covariance)
     flattened = flatten_pgg_measurements(poles, ells=ells)
     pole_errors = _split_errors(errors, nk=len(k), ells=ells)
@@ -125,10 +131,10 @@ def main() -> None:
     print(f"data: {args.data}")
     print(f"mocks: {args.mocks}")
     print(f"ells: {', '.join(str(ell) for ell in ells)}")
-    print(f"n_mocks: {mock_matrix.shape[0]}")
     print(f"n_k: {len(k)}")
     print(f"data_vector_length: {flattened.size}")
     print(f"covariance_shape: {covariance.shape}")
+    print(f"covariance_cache: {covariance_cache_path}")
 
     _plot_measurements(args.output, k=k, poles=poles, pole_errors=pole_errors, ells=ells, show=args.show)
 

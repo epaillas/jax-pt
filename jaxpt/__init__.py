@@ -11,7 +11,16 @@ from .inference import BaseSampler, PocoMCSampler
 from .parameter import Parameter, ParameterCollection
 from .reference.classpt import BasisSpectra, MultipolePrediction
 from .reference.parity import compare_multipoles_to_classpt, compare_predictions
-from .utils import covariance_errors, flatten_pgg_measurements, load_pgg_data_vector, load_pgg_mock_matrix, sample_covariance
+from .utils import (
+    cached_sample_covariance,
+    covariance_cache_key,
+    covariance_errors,
+    flatten_pgg_measurements,
+    load_pgg_data_vector,
+    load_pgg_mock_matrix,
+    repo_cache_dir,
+    sample_covariance,
+)
 from .theories import (
     ClassPTGalaxyPowerSpectrumMultipolesTheory,
     GalaxyPowerSpectrumMultipolesTheory,
@@ -37,9 +46,11 @@ __all__ = [
     "build_linear_input_from_classy",
     "build_linear_input_from_cosmoprimo",
     "build_realspace_predictor",
+    "cached_sample_covariance",
     "compare_multipoles_to_classpt",
     "compare_predictions",
     "covariance_errors",
+    "covariance_cache_key",
     "compute_basis",
     "flatten_pgg_measurements",
     "galaxy_multipoles",
@@ -49,5 +60,6 @@ __all__ = [
     "load_galaxy_power_spectrum_multipoles_parameters",
     "load_power_spectrum_template_parameters",
     "matter_real_spectrum",
+    "repo_cache_dir",
     "sample_covariance",
 ]

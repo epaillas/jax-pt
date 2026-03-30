@@ -10,9 +10,9 @@ if str(ROOT) not in sys.path:
 
 import numpy as np
 
-from jaxpt import PocoMCSampler, TaylorEmulator
+from jaxpt import PocoMCSampler, TaylorEmulator, cached_sample_covariance, repo_cache_dir
 from jaxpt.parameter import ParameterCollection
-from jaxpt.utils import flatten_pgg_measurements, load_pgg_data_vector, load_pgg_mock_matrix, sample_covariance
+from jaxpt.utils import flatten_pgg_measurements, load_pgg_data_vector
 
 
 DEFAULT_DATA_PATH = ROOT / "data" / "data_vector" / "mesh2_spectrum_poles_c000_hod006.h5"
@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.0,
         help="Diagonal covariance regularization added after the sample covariance is built.",
+    )
+    parser.add_argument(
+        "--covariance-cache-dir",
+        type=Path,
+        default=repo_cache_dir("covariances"),
+        help="Directory where hashed covariance artifacts are stored.",
     )
     parser.add_argument(
         "--param",
@@ -144,16 +150,16 @@ def main() -> None:
     prior_overrides = _build_prior_overrides(emulator, args.flat_prior, args.gaussian_prior)
 
     k_data, poles = load_pgg_data_vector(args.data, ells=ells, rebin=args.rebin, kmin=args.kmin, kmax=args.kmax)
-    _, mock_matrix = load_pgg_mock_matrix(
+    _, covariance, covariance_cache_path = cached_sample_covariance(
         args.mocks,
         ells=ells,
         rebin=args.rebin,
         k_data=k_data,
         kmin=args.kmin,
         kmax=args.kmax,
+        cache_dir=args.covariance_cache_dir,
     )
     data_vector = flatten_pgg_measurements(poles, ells=ells)
-    covariance = sample_covariance(mock_matrix)
     if args.covariance_jitter > 0.0:
         covariance = covariance + float(args.covariance_jitter) * np.eye(covariance.shape[0], dtype=float)
 
@@ -200,8 +206,8 @@ def main() -> None:
     print(f"n_k: {len(k_data)}")
     print(f"data_vector_length: {data_vector.size}")
     print(f"sampled parameters ({len(sampled_parameters)}): {', '.join(sampled_parameters)}")
-    print(f"n_mocks: {mock_matrix.shape[0]}")
     print(f"covariance_shape: {covariance.shape}")
+    print(f"covariance_cache: {covariance_cache_path}")
     print(f"covariance_jitter: {args.covariance_jitter:g}")
     print(f"precondition: {not args.no_precondition}")
     if logz is not None:

@@ -112,4 +112,5 @@ def test_run_pocomc_inference_script_smoke(tmp_path) -> None:
         assert data["parameter_names"].tolist() == ["b1"]
     assert "PocoMC inference" in result.stdout
     assert "sampled parameters (1): b1" in result.stdout
+    assert "covariance_cache:" in result.stdout
     assert "posterior_samples:" in result.stdout
