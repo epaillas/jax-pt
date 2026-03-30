@@ -7,6 +7,7 @@ from .config import PTSettings
 from .cosmology import LinearPowerInput, build_linear_input_from_classy, build_linear_input_from_cosmoprimo
 from .emulators import TaylorEmulator
 from .native import build_native_realspace_predictor, compute_basis
+from .parameter import Parameter, ParameterCollection
 from .reference.classpt import BasisSpectra, MultipolePrediction
 from .reference.parity import compare_multipoles_to_classpt, compare_predictions
 from .theories import (
@@ -14,7 +15,9 @@ from .theories import (
     GalaxyPowerSpectrumMultipolesTheory,
     PowerSpectrumTemplate,
     load_galaxy_power_spectrum_multipoles_defaults,
+    load_galaxy_power_spectrum_multipoles_parameters,
     load_power_spectrum_template_defaults,
+    load_power_spectrum_template_parameters,
     predict_galaxy_multipoles,
 )
 
@@ -24,6 +27,8 @@ __all__ = [
     "GalaxyPowerSpectrumMultipolesTheory",
     "LinearPowerInput",
     "MultipolePrediction",
+    "Parameter",
+    "ParameterCollection",
     "PTSettings",
     "PowerSpectrumTemplate",
     "TaylorEmulator",
@@ -36,7 +41,9 @@ __all__ = [
     "galaxy_multipoles",
     "galaxy_real_spectrum",
     "load_galaxy_power_spectrum_multipoles_defaults",
+    "load_galaxy_power_spectrum_multipoles_parameters",
     "load_power_spectrum_template_defaults",
+    "load_power_spectrum_template_parameters",
     "matter_real_spectrum",
     "predict_galaxy_multipoles",
 ]

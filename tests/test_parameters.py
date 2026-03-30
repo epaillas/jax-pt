@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import numpy as np
+
+from jaxpt import LinearPowerInput, PTSettings, ParameterCollection, TaylorEmulator
+from jaxpt.theories import (
+    GalaxyPowerSpectrumMultipolesTheory,
+    PowerSpectrumTemplate,
+    load_galaxy_power_spectrum_multipoles_defaults,
+    load_galaxy_power_spectrum_multipoles_parameters,
+    load_power_spectrum_template_parameters,
+)
+
+
+def test_parameter_yaml_loaders_preserve_values_and_statuses() -> None:
+    template_params = load_power_spectrum_template_parameters()
+    nuisance_params = load_galaxy_power_spectrum_multipoles_parameters()
+
+    assert template_params["omega_cdm"].value == 0.12
+    assert template_params["Omega_k"].fixed is True
+    assert template_params["w0_fld"].fixed is True
+    assert nuisance_params["b1"].value == 2.0
+    assert nuisance_params["cs2"].marginalized is False
+
+
+def test_parameter_update_changes_emulation_status() -> None:
+    params = load_power_spectrum_template_parameters()
+
+    assert params["omega_cdm"].emulated is True
+    params["omega_cdm"].update(marginalized=True)
+    assert params["omega_cdm"].marginalized is True
+    assert params["omega_cdm"].emulated is False
+
+
+def test_theory_exposes_merged_parameter_collection() -> None:
+    template = PowerSpectrumTemplate({"omega_cdm": 0.13}, z=0.5, settings=PTSettings())
+    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=np.linspace(0.02, 0.1, 4))
+
+    assert "omega_cdm" in theory.params
+    assert "b1" in theory.params
+    assert theory.params["omega_cdm"].value == 0.13
+    assert theory.params["Omega_k"].fixed is True
+
+    theory.params["omega_cdm"].update(marginalized=True)
+    assert template.params["omega_cdm"].marginalized is True
+
+
+def test_theory_without_arguments_uses_default_parameter_configuration() -> None:
+    linear_input = LinearPowerInput(
+        k=np.logspace(-3.0, 0.0, 64),
+        pk_linear=np.linspace(2.0e4, 5.0e2, 64),
+        z=0.5,
+        growth_factor=0.76,
+        growth_rate=0.81,
+        h=0.67,
+    )
+    theory = GalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(linear_input, settings=PTSettings(ir_resummation=False)),
+        k=np.linspace(0.02, 0.18, 12),
+    )
+
+    implicit = theory()
+    explicit = theory(load_galaxy_power_spectrum_multipoles_defaults())
+
+    np.testing.assert_allclose(implicit.p0, explicit.p0, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(implicit.p2, explicit.p2, rtol=1e-12, atol=1e-12)
+    np.testing.assert_allclose(implicit.p4, explicit.p4, rtol=1e-12, atol=1e-12)
+
+
+def test_taylor_emulator_defaults_to_emulated_parameter_subset() -> None:
+    class ToyTheory:
+        def __init__(self) -> None:
+            self.params = ParameterCollection(
+                {
+                    "x": {"value": 1.0},
+                    "y": {"value": 2.0, "marginalized": True},
+                    "z": {"value": 3.0, "fixed": True},
+                }
+            )
+
+        def __call__(self, params):
+            return np.asarray([params["x"] + params["y"] + params["z"]], dtype=float)
+
+    theory = ToyTheory()
+    emulator = TaylorEmulator(
+        theory,
+        fiducial=theory.params.defaults_dict(),
+        order=1,
+        step_sizes={"x": 0.1, "y": 0.1, "z": 0.1},
+    )
+
+    assert emulator.param_names == ["x"]

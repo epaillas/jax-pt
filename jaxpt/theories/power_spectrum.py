@@ -6,6 +6,7 @@ from typing import Any
 
 import numpy as np
 
+from ..parameter import ParameterCollection
 from ..bias import galaxy_multipoles
 from ..config import PTSettings
 from ..cosmology import (
@@ -17,11 +18,16 @@ from ..cosmology import (
 )
 from ..native import compute_basis
 from ..reference.classpt import BasisSpectra, MultipolePrediction, predict_classpt_multipoles
-from .base import BasePowerSpectrumTheory, finalize_multipole_prediction, normalize_flat_query
-from .defaults import load_galaxy_power_spectrum_multipoles_defaults, load_power_spectrum_template_defaults
+from .base import BasePowerSpectrumTheory, default_nuisance_parameters, finalize_multipole_prediction, normalize_flat_query
+from .defaults import (
+    load_galaxy_power_spectrum_multipoles_defaults,
+    load_power_spectrum_template_defaults,
+    load_power_spectrum_template_parameters,
+)
 
 
 _TEMPLATE_DEFAULTS = load_power_spectrum_template_defaults()
+_TEMPLATE_PARAMETERS = load_power_spectrum_template_parameters()
 
 
 def _is_cosmoprimo_cosmology(source: Any) -> bool:
@@ -72,6 +78,7 @@ class PowerSpectrumTemplate:
     input_recipe: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     provider: str | None = None
+    params: ParameterCollection = field(init=False, repr=False)
     _fixed_linear_input: LinearPowerInput | None = field(init=False, default=None, repr=False)
     _cosmology_provider: BaseCosmologyProvider | None = field(init=False, default=None, repr=False)
     _resolved_state: ResolvedCosmologyState | None = field(init=False, default=None, repr=False)
@@ -80,6 +87,7 @@ class PowerSpectrumTemplate:
         if self.k is not None:
             self.k = np.asarray(self.k, dtype=float)
         self.metadata = dict(self.metadata)
+        self.params = _TEMPLATE_PARAMETERS.copy()
         if isinstance(self.source, LinearPowerInput):
             if self.z is not None and not np.isclose(float(self.z), float(self.source.z)):
                 raise ValueError("PowerSpectrumTemplate z must match LinearPowerInput.z when both are provided.")
@@ -87,6 +95,8 @@ class PowerSpectrumTemplate:
                 raise ValueError("PowerSpectrumTemplate.input_recipe is only supported for cosmology-backed templates.")
             self._fixed_linear_input = self.source
             self.z = float(self.source.z)
+            for parameter in self.params:
+                parameter.update(fixed=True)
             return
 
         if self.z is None:
@@ -99,6 +109,10 @@ class PowerSpectrumTemplate:
             input_recipe=self.input_recipe,
             provider=self.provider,
         )
+        assert self._cosmology_provider is not None
+        for name, value in self._cosmology_provider.fiducial_params.items():
+            if name in self.params:
+                self.params[name].update(value=float(value))
 
     @classmethod
     def from_linear_input(
@@ -116,7 +130,7 @@ class PowerSpectrumTemplate:
 
     @property
     def default_cosmology(self) -> dict[str, float]:
-        return dict(_TEMPLATE_DEFAULTS)
+        return self.params.defaults_dict()
 
     @property
     def cosmology_param_names(self) -> set[str]:
@@ -161,7 +175,7 @@ class PowerSpectrumTemplate:
 
 @dataclass(slots=True)
 class GalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
-    nuisance_defaults: dict[str, float] = field(default_factory=load_galaxy_power_spectrum_multipoles_defaults)
+    nuisance_parameters: ParameterCollection = field(default_factory=default_nuisance_parameters, repr=False)
     _basis: BasisSpectra | None = field(init=False, default=None, repr=False)
     _basis_query_key: tuple[tuple[str, Any], ...] | None = field(init=False, default=None, repr=False)
 
@@ -220,7 +234,7 @@ class GalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
 
 @dataclass(slots=True)
 class ClassPTGalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
-    nuisance_defaults: dict[str, float] = field(default_factory=load_galaxy_power_spectrum_multipoles_defaults)
+    nuisance_parameters: ParameterCollection = field(default_factory=default_nuisance_parameters, repr=False)
 
     def __post_init__(self) -> None:
         BasePowerSpectrumTheory.__post_init__(self)

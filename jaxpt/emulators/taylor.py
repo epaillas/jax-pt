@@ -212,7 +212,11 @@ class TaylorEmulator:
             raise ValueError("TaylorEmulator.finite_difference_accuracy must be positive.")
 
         if self.param_names is None:
-            self.param_names = list(self.fiducial)
+            if self.theory_fn is not None and hasattr(self.theory_fn, "params") and hasattr(self.theory_fn.params, "emulated_names"):
+                emulated_names = [str(name) for name in self.theory_fn.params.emulated_names() if str(name) in self.fiducial]
+                self.param_names = emulated_names if emulated_names else list(self.fiducial)
+            else:
+                self.param_names = list(self.fiducial)
         else:
             self.param_names = [str(name) for name in self.param_names]
 

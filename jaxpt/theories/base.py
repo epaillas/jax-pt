@@ -8,12 +8,18 @@ import numpy as np
 
 from ..config import PTSettings
 from ..cosmology import LinearPowerInput
+from ..parameter import ParameterCollection
 from ..reference.classpt import MultipolePrediction
-from .defaults import load_galaxy_power_spectrum_multipoles_defaults, load_power_spectrum_template_defaults
+from .defaults import (
+    load_galaxy_power_spectrum_multipoles_defaults,
+    load_galaxy_power_spectrum_multipoles_parameters,
+    load_power_spectrum_template_defaults,
+)
 
 
 _NUISANCE_DEFAULTS = load_galaxy_power_spectrum_multipoles_defaults()
 _NUISANCE_PARAM_NAMES = tuple(_NUISANCE_DEFAULTS)
+_NUISANCE_PARAMETERS = load_galaxy_power_spectrum_multipoles_parameters()
 _TEMPLATE_DEFAULTS = load_power_spectrum_template_defaults()
 _COSMOLOGY_ALIAS_NAMES = {"A_s", "logA", "ln10^10A_s", "h", "H0"}
 _COMMON_COSMOLOGY_PARAM_NAMES = set(_TEMPLATE_DEFAULTS) | _COSMOLOGY_ALIAS_NAMES
@@ -76,7 +82,11 @@ def finalize_multipole_prediction(
 
 class CosmologyQueryMixin:
     template: Any
-    nuisance_defaults: Mapping[str, float]
+    nuisance_parameters: ParameterCollection
+
+    @property
+    def nuisance_defaults(self) -> dict[str, float]:
+        return self.nuisance_parameters.defaults_dict()
 
     def _split_query(self, query: Mapping[str, float]) -> tuple[dict[str, float], dict[str, float]]:
         nuisance, cosmology, unknown = {}, {}, []
@@ -118,3 +128,11 @@ class BasePowerSpectrumTheory(CosmologyQueryMixin):
     @property
     def z(self) -> float:
         return float(self.template.z)
+
+    @property
+    def params(self) -> ParameterCollection:
+        return ParameterCollection.combine(self.template.params, self.nuisance_parameters)
+
+
+def default_nuisance_parameters() -> ParameterCollection:
+    return _NUISANCE_PARAMETERS.copy()
