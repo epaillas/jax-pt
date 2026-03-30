@@ -276,7 +276,7 @@ def test_build_native_multipole_taylor_emulator_rejects_marginalized_parameter_r
 
 def test_build_native_multipole_taylor_emulator_script_smoke(tmp_path) -> None:
     pytest.importorskip("classy")
-    script = Path(__file__).resolve().parents[1] / "scripts" / "build_native_multipole_taylor_emulator.py"
+    script = Path(__file__).resolve().parents[1] / "scripts" / "build_taylor_emulator.py"
     result = subprocess.run(
         [
             sys.executable,
@@ -285,8 +285,6 @@ def test_build_native_multipole_taylor_emulator_script_smoke(tmp_path) -> None:
             "1",
             "--nk",
             "4",
-            "--support-nk",
-            "32",
             "--output-dir",
             str(tmp_path),
         ],

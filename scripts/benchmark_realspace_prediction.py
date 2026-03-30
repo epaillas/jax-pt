@@ -76,7 +76,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=[32, 64, 128, 256],
         help="Evaluation-grid sizes for the scaling benchmark.",
     )
-    parser.add_argument("--support-nk", type=int, default=256, help="Number of linear-theory support-grid points.")
     parser.add_argument("--warmup", type=int, default=3, help="Warmup iterations before steady-state timing.")
     parser.add_argument("--repeat", type=int, default=30, help="Measured iterations per benchmark point.")
     parser.add_argument(
@@ -224,7 +223,7 @@ def main() -> None:
     cosmo.set({**FIDUCIAL_COSMOLOGY, **PT_OPTIONS_NOIR, "z_pk": args.z})
     cosmo.compute()
 
-    support_k = np.logspace(-5.0, 1.0, args.support_nk)
+    support_k = np.logspace(-5.0, 1.0, settings.integration_nk)
     linear_input = build_linear_input_from_classy(cosmo, z=args.z, k=support_k)
     eval_k = np.linspace(args.kmin, args.kmax, args.nk)
 
@@ -264,7 +263,6 @@ def main() -> None:
             "kmin": args.kmin,
             "kmax": args.kmax,
             "nk": args.nk,
-            "support_nk": args.support_nk,
             "warmup": args.warmup,
             "repeat": args.repeat,
             "grid_sizes": args.grid_sizes,

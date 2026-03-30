@@ -39,7 +39,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kmin", type=float, default=0.01, help="Minimum evaluation k in 1/Mpc.")
     parser.add_argument("--kmax", type=float, default=0.2, help="Maximum evaluation k in 1/Mpc.")
     parser.add_argument("--nk", type=int, default=64, help="Number of evaluation-grid points.")
-    parser.add_argument("--support-nk", type=int, default=256, help="Number of support-grid points for linear inputs.")
     parser.add_argument("--order", type=int, default=4, help="Taylor expansion order.")
     parser.add_argument("--finite-difference-accuracy", type=int, default=2, help="Finite-difference stencil accuracy.")
     parser.add_argument("--step-size-scale", type=float, default=0.01, help="Relative default step size for emulated parameters.")
@@ -105,10 +104,9 @@ def main() -> None:
     cosmology_defaults.update(dict(args.cosmo))
 
     settings = PTSettings(backend="native", ir_resummation=False)
-    support_k = np.logspace(-5.0, 1.0, args.support_nk)
     eval_k = np.linspace(args.kmin, args.kmax, args.nk)
 
-    template = PowerSpectrumTemplate(cosmology_defaults, z=args.z, k=support_k, settings=settings, provider="cosmoprimo")
+    template = PowerSpectrumTemplate(cosmology_defaults, z=args.z, settings=settings, provider="cosmoprimo")
     theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
     for name, value in nuisance_defaults.items():
         theory.params[name].update(value=value)

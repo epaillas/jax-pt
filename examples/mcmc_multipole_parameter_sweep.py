@@ -56,12 +56,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--kmax", type=float, default=0.2, help="Maximum evaluation k in 1/Mpc.")
     parser.add_argument("--nk", type=int, default=96, help="Number of evaluation-grid points.")
     parser.add_argument(
-        "--support-nk",
-        type=int,
-        default=256,
-        help="Number of support-grid points used when building LinearPowerInput.",
-    )
-    parser.add_argument(
         "--output",
         type=Path,
         default=Path(__file__).with_name("mcmc_multipole_parameter_sweep.png"),
@@ -93,13 +87,11 @@ def main() -> None:
     args = build_parser().parse_args()
 
     settings = PTSettings(ir_resummation=False)
-    support_k = np.logspace(-5.0, 1.0, args.support_nk)
     eval_k = np.linspace(args.kmin, args.kmax, args.nk)
 
     template = PowerSpectrumTemplate(
         dict(PT_OPTIONS_NOIR),
         z=args.z,
-        k=support_k,
         settings=settings,
     )
     theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
