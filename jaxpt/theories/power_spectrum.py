@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..parameter import ParameterCollection
-from ..bias import galaxy_multipoles
+from ..bias import galaxy_multipole_templates, galaxy_multipoles
 from ..config import PTSettings
 from ..cosmology import (
     BaseCosmologyProvider,
@@ -340,6 +340,35 @@ class GalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
             theory_name=self.__class__.__name__,
             template_name=self.template.__class__.__name__,
         )
+
+    def marginalized_design_matrix(
+        self,
+        parameters: Mapping[str, float] | None = None,
+        *,
+        parameter_names: tuple[str, ...] | list[str] | None = None,
+        **kwargs: float,
+    ) -> np.ndarray:
+        """Return flattened linear templates for marginalized nuisance terms."""
+        query = normalize_flat_query(parameters, kwargs)
+        nuisance_params, cosmology_params = self._split_query(query)
+        state = self.template.resolve(cosmology_params)
+
+        if self.template.settings.backend != "jaxpt":
+            raise NotImplementedError("Analytic marginalization templates are only implemented for the jaxpt multipole backend.")
+
+        if self._basis is None or self._basis_query_key != state.query_key:
+            self._basis = compute_basis(state.linear_input, settings=self.template.settings, k=self.k)
+            self._basis_query_key = state.query_key
+
+        names = tuple(self.params.marginalized_names()) if parameter_names is None else tuple(str(name) for name in parameter_names)
+        templates = galaxy_multipole_templates(self._basis, nuisance_params, names=names)
+        columns = []
+        for name in names:
+            template = templates[name]
+            columns.append(np.concatenate([np.asarray(template.p0), np.asarray(template.p2), np.asarray(template.p4)]))
+        if not columns:
+            return np.zeros((self.k.size * 3, 0), dtype=float)
+        return np.column_stack(columns)
 
 
 @dataclass(slots=True)

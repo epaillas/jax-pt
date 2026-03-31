@@ -183,6 +183,45 @@ def test_taylor_emulator_preserves_parameter_collection_metadata(tmp_path) -> No
     assert loaded.params["y"].value == 2.0
 
 
+def test_taylor_emulator_serializes_marginalized_design_matrix(tmp_path) -> None:
+    emulator = TaylorEmulator(
+        lambda query: np.asarray([query["x"]], dtype=float),
+        fiducial={"x": 0.0, "a": 1.5},
+        order=1,
+        step_sizes={"x": 0.1},
+        param_names=["x"],
+        valid_param_names=["x", "a"],
+        params=ParameterCollection(
+            {
+                "x": {"value": 0.0},
+                "a": {"value": 1.5, "marginalized": True},
+            }
+        ),
+    ).build()
+    template_emulator = TaylorEmulator(
+        lambda query: np.asarray([[2.0 + query["x"]]], dtype=float),
+        fiducial={"x": 0.0, "a": 1.5},
+        order=1,
+        step_sizes={"x": 0.1},
+        param_names=["x"],
+        valid_param_names=["x", "a"],
+    ).build()
+    assert template_emulator._coefficients is not None
+    assert template_emulator._output_state is not None
+    emulator.attach_marginalized_design(["a"], template_emulator._coefficients, template_emulator._output_state)
+
+    path = tmp_path / "design_emulator.npz"
+    emulator.save(path)
+    loaded = TaylorEmulator.load(path)
+
+    np.testing.assert_allclose(
+        loaded.marginalized_design_matrix({"x": 0.3}, parameter_names=("a",)),
+        np.asarray([[2.3]], dtype=float),
+        rtol=1e-11,
+        atol=1e-11,
+    )
+
+
 def test_taylor_emulator_loads_legacy_file_without_parameter_metadata(tmp_path) -> None:
     emulator = TaylorEmulator(
         lambda query: np.asarray([query["x"] ** 2], dtype=float),
@@ -294,7 +333,7 @@ def test_build_multipole_emulator_uses_non_fixed_non_marginalized_params(tmp_pat
         cache_dir=tmp_path,
     )
 
-    assert emulator.param_names == ["b1", "b2", "bG2", "bGamma3", "b4"]
+    assert emulator.param_names == ["b1", "b2", "bG2"]
     assert emulator.cache_path is not None
     assert emulator.cache_path.name.startswith("taylor_")
     assert emulator.cache_path.suffix == ".npz"

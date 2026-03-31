@@ -196,6 +196,43 @@ class _MatchedKModel:
             metadata=dict(prediction.metadata),
         )
 
+    def marginalized_design_matrix(
+        self,
+        parameters: dict[str, float],
+        *,
+        parameter_names: tuple[str, ...] | list[str] | None = None,
+    ) -> np.ndarray:
+        matrix = np.asarray(self.model.marginalized_design_matrix(parameters, parameter_names=parameter_names), dtype=float)
+        prediction = self.model.predict(parameters)
+        if not isinstance(prediction, MultipolePrediction):
+            return matrix
+
+        source_k = np.asarray(prediction.k, dtype=float).reshape(-1)
+        target_k = np.asarray(self.k_target, dtype=float).reshape(-1)
+        if source_k.shape == target_k.shape and np.allclose(source_k, target_k, rtol=self.rtol, atol=self.atol):
+            return matrix
+        if target_k[0] < source_k[0] - self.atol or target_k[-1] > source_k[-1] + self.atol:
+            raise ValueError(
+                "Likelihood k-grid extends beyond the emulator support: "
+                f"[{target_k[0]:.6g}, {target_k[-1]:.6g}] vs "
+                f"[{source_k[0]:.6g}, {source_k[-1]:.6g}]."
+            )
+
+        n_source = source_k.size
+        columns = []
+        for index in range(matrix.shape[1]):
+            source_column = np.asarray(matrix[:, index], dtype=float).reshape(3, n_source)
+            columns.append(
+                np.concatenate(
+                    [
+                        np.interp(target_k, source_k, source_column[0]),
+                        np.interp(target_k, source_k, source_column[1]),
+                        np.interp(target_k, source_k, source_column[2]),
+                    ]
+                )
+            )
+        return np.column_stack(columns) if columns else np.zeros((target_k.size * 3, 0), dtype=float)
+
 
 def main() -> None:
     args = build_parser().parse_args()
@@ -217,6 +254,7 @@ def main() -> None:
         kmax=args.kmax,
         cache_dir=args.covariance_cache_dir,
     )
+    covariance /= 64
     data_vector = flatten_pgg_measurements(poles, ells=ells)
     if args.covariance_jitter > 0.0:
         covariance = covariance + float(args.covariance_jitter) * np.eye(covariance.shape[0], dtype=float)

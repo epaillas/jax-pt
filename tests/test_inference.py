@@ -8,6 +8,118 @@ from jaxpt.parameter import ParameterCollection
 from jaxpt.reference.classpt import MultipolePrediction
 
 
+def test_base_sampler_analytic_marginalization_matches_manual_gaussian_result() -> None:
+    class ToyLinearModel:
+        def __init__(self) -> None:
+            self.params = ParameterCollection(
+                {
+                    "x": {"value": 0.0, "prior": {"type": "gaussian", "mean": 0.0, "sigma": 1.0}},
+                    "a": {"value": 0.0, "marginalized": True, "prior": {"type": "gaussian", "mean": 1.0, "sigma": 2.0}},
+                }
+            )
+
+        def predict(self, params):
+            return np.asarray([2.0 * params["x"]], dtype=float)
+
+        def marginalized_design_matrix(self, params, *, parameter_names=None):
+            del params
+            assert parameter_names == ("a",)
+            return np.asarray([[3.0]], dtype=float)
+
+    sampler = BaseSampler(
+        data=np.asarray([5.0]),
+        model=ToyLinearModel(),
+        covariance=np.asarray([[4.0]]),
+    )
+
+    sigma_y2 = 4.0
+    sigma_a2 = 4.0
+    expected_mean = 2.0 * 0.5 + 3.0 * 1.0
+    expected_variance = sigma_y2 + 9.0 * sigma_a2
+    expected = -0.5 * (np.log(2.0 * np.pi * expected_variance) + (5.0 - expected_mean) ** 2 / expected_variance)
+    assert np.isclose(sampler.log_likelihood(np.asarray([0.5])), expected)
+
+
+def test_base_sampler_analytic_marginalization_supports_flat_prior() -> None:
+    class ToyLinearModel:
+        def __init__(self) -> None:
+            self.params = ParameterCollection(
+                {
+                    "x": {"value": 0.0, "prior": {"type": "gaussian", "mean": 0.0, "sigma": 1.0}},
+                    "a": {"value": 0.0, "marginalized": True, "prior": {"type": "flat", "min": 0.0, "max": 10.0}},
+                }
+            )
+
+        def predict(self, params):
+            return np.asarray([params["x"]], dtype=float)
+
+        def marginalized_design_matrix(self, params, *, parameter_names=None):
+            del params
+            assert parameter_names == ("a",)
+            return np.asarray([[2.0]], dtype=float)
+
+    sampler = BaseSampler(
+        data=np.asarray([1.0]),
+        model=ToyLinearModel(),
+        covariance=np.asarray([[9.0]]),
+    )
+
+    expected = -np.log(2.0)
+    assert np.isclose(sampler.log_likelihood(np.asarray([1.0])), expected)
+
+
+def test_base_sampler_rejects_missing_design_matrix_for_marginalized_parameters() -> None:
+    class ToyModel:
+        def __init__(self) -> None:
+            self.params = ParameterCollection(
+                {
+                    "x": {"value": 0.0, "prior": {"type": "gaussian", "mean": 0.0, "sigma": 1.0}},
+                    "a": {"value": 0.0, "marginalized": True},
+                }
+            )
+
+        def predict(self, params):
+            return np.asarray([params["x"]], dtype=float)
+
+    sampler = BaseSampler(
+        data=np.asarray([0.0]),
+        model=ToyModel(),
+        covariance=np.eye(1),
+    )
+
+    with pytest.raises(ValueError, match="marginalized_design_matrix"):
+        sampler.log_likelihood(np.asarray([0.0]))
+
+
+def test_base_sampler_default_parameter_names_exclude_marginalized_parameters() -> None:
+    class ToyModel:
+        def __init__(self) -> None:
+            self.params = ParameterCollection(
+                {
+                    "x": {"value": 0.0, "prior": {"type": "gaussian", "mean": 0.0, "sigma": 1.0}},
+                    "a": {"value": 0.0, "marginalized": True},
+                }
+            )
+
+        def predict(self, params):
+            return np.asarray([params["x"]], dtype=float)
+
+        def marginalized_design_matrix(self, params, *, parameter_names=None):
+            del params
+            assert parameter_names == ("a",)
+            return np.asarray([[1.0]], dtype=float)
+
+    sampler = BaseSampler(
+        data=np.asarray([0.0]),
+        model=ToyModel(),
+        covariance=np.eye(1),
+    )
+
+    assert sampler.parameter_names == ("x",)
+    assert sampler.sampled_parameter_names == ("x",)
+    assert sampler.marginalized_parameter_names == ("a",)
+
+
 def test_base_sampler_gaussian_loglikelihood_matches_manual_result() -> None:
     class ToyModel:
         def __init__(self) -> None:

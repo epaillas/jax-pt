@@ -108,4 +108,28 @@ def build_multipole_emulator(
         metadata=build_metadata,
         valid_param_names=valid_param_names,
     )
-    return emulator.build(force=force, progress_callback=progress_callback)
+    emulator = emulator.build(force=force, progress_callback=progress_callback)
+
+    marginalized_names = list(params.marginalized_names())
+    if marginalized_names:
+        template_emulator = TaylorEmulator(
+            theory_fn=lambda query: np.asarray(theory.marginalized_design_matrix(query, parameter_names=marginalized_names), dtype=float),
+            fiducial=fiducial,
+            order=order,
+            step_sizes=step_sizes,
+            param_names=emulated_names,
+            finite_difference_accuracy=finite_difference_accuracy,
+            valid_param_names=valid_param_names,
+            params=params,
+        ).build()
+        assert template_emulator._coefficients is not None
+        assert template_emulator._output_state is not None
+        emulator.attach_marginalized_design(
+            marginalized_names,
+            template_emulator._coefficients,
+            template_emulator._output_state,
+        )
+        if emulator.cache_path is not None:
+            emulator.save(emulator.cache_path)
+
+    return emulator

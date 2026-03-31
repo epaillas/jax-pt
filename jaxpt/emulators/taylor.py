@@ -274,6 +274,9 @@ class TaylorEmulator:
     _cache_path: Path | None = field(init=False, default=None, repr=False)
     _valid_param_names: tuple[str, ...] = field(init=False, repr=False)
     _constrained_param_names: tuple[str, ...] = field(init=False, repr=False)
+    _marginalized_param_names: tuple[str, ...] = field(init=False, repr=False, default=())
+    _marginalized_coefficients: np.ndarray | None = field(init=False, default=None, repr=False)
+    _marginalized_output_state: dict[str, Any] | None = field(init=False, default=None, repr=False)
 
     def __post_init__(self) -> None:
         self.fiducial = {str(name): float(value) for name, value in dict(self.fiducial).items()}
@@ -327,6 +330,9 @@ class TaylorEmulator:
         self._output_adapter = self.output_adapter
         self._eval_cache: dict[tuple[int, ...], np.ndarray] = {}
         self._cache_path: Path | None = None
+        self._marginalized_param_names = ()
+        self._marginalized_coefficients = None
+        self._marginalized_output_state = None
 
     def _resolve_params(self, params: ParameterCollection | Mapping[str, Any] | None) -> ParameterCollection:
         if params is None and self.theory_fn is not None and hasattr(self.theory_fn, "params"):
@@ -380,7 +386,7 @@ class TaylorEmulator:
         return self._cache_path
 
     def _config_payload(self) -> dict[str, Any]:
-        return {
+        payload = {
             "version": _SERIALIZATION_VERSION,
             "order": self.order,
             "finite_difference_accuracy": self.finite_difference_accuracy,
@@ -393,6 +399,9 @@ class TaylorEmulator:
             "metadata": dict(self.metadata),
             "parameter_collection": _serialize_parameter_collection(self.params),
         }
+        if self._marginalized_param_names:
+            payload["marginalized_param_names"] = list(self._marginalized_param_names)
+        return payload
 
     def _default_cache_key(self) -> str:
         frozen = _freeze_cache_value(self._config_payload())
@@ -477,6 +486,9 @@ class TaylorEmulator:
             self._cache_path = loaded._cache_path
             self._valid_param_names = loaded._valid_param_names
             self._constrained_param_names = loaded._constrained_param_names
+            self._marginalized_param_names = loaded._marginalized_param_names
+            self._marginalized_coefficients = loaded._marginalized_coefficients
+            self._marginalized_output_state = loaded._marginalized_output_state
             return self
 
         self._eval_cache = {}
@@ -540,6 +552,47 @@ class TaylorEmulator:
         assert self._output_state is not None
         return self._output_adapter.reconstruct(vector, self._output_state)
 
+    def attach_marginalized_design(
+        self,
+        parameter_names: list[str] | tuple[str, ...],
+        coefficients: np.ndarray,
+        output_state: dict[str, Any],
+    ) -> TaylorEmulator:
+        self._marginalized_param_names = tuple(str(name) for name in parameter_names)
+        self._marginalized_coefficients = np.asarray(coefficients, dtype=float)
+        self._marginalized_output_state = dict(output_state)
+        return self
+
+    def marginalized_design_matrix(
+        self,
+        parameters: Mapping[str, float] | None = None,
+        *,
+        parameter_names: list[str] | tuple[str, ...] | None = None,
+        **kwargs: float,
+    ) -> np.ndarray:
+        if self._marginalized_coefficients is None or self._marginalized_output_state is None:
+            raise ValueError("TaylorEmulator does not carry marginalized design-matrix coefficients.")
+
+        query = _normalize_query(parameters, kwargs)
+        vector = self._predict_vector(query)
+        del vector
+        deltas = np.asarray([float(query.get(name, self.fiducial[name])) - self.fiducial[name] for name in self.param_names], dtype=float)
+        monomials = np.prod(np.power(deltas[None, :], self._powers, dtype=float), axis=1)
+        flattened = monomials @ self._marginalized_coefficients
+        matrix = _reconstruct_array_output(flattened, self._marginalized_output_state)
+        array = np.asarray(matrix, dtype=float)
+        if array.ndim != 2:
+            raise ValueError("Serialized marginalized design matrix must reconstruct to a two-dimensional array.")
+        if parameter_names is None:
+            return array
+        requested = tuple(str(name) for name in parameter_names)
+        index = {name: i for i, name in enumerate(self._marginalized_param_names)}
+        try:
+            columns = [index[name] for name in requested]
+        except KeyError as exc:
+            raise ValueError(f"Unknown marginalized emulator parameter '{exc.args[0]}'.") from exc
+        return array[:, columns]
+
     def _serialized_state(self) -> dict[str, Any]:
         if not self.is_built or self._coefficients is None or self._output_state is None or self._output_adapter is None:
             raise ValueError("TaylorEmulator must be built before serialization.")
@@ -554,6 +607,11 @@ class TaylorEmulator:
             "step_sizes": np.asarray([self._step_sizes[name] for name in self.param_names], dtype=float),
             "config_json": json.dumps(payload, sort_keys=True),
             "output_state_json": json.dumps(self._output_state, sort_keys=True),
+            "marginalized_coefficients": self._marginalized_coefficients if self._marginalized_coefficients is not None else np.asarray([], dtype=float),
+            "marginalized_output_state_json": json.dumps(
+                {} if self._marginalized_output_state is None else self._marginalized_output_state,
+                sort_keys=True,
+            ),
         }
 
     def save(self, path: str | Path) -> Path:
@@ -621,4 +679,11 @@ class TaylorEmulator:
             emulator._output_adapter = adapter
             emulator._cache_path = source
             emulator._eval_cache = {}
+            marginalized_names = tuple(str(name) for name in config.get("marginalized_param_names", []))
+            marginalized_coefficients = np.asarray(data["marginalized_coefficients"], dtype=float)
+            marginalized_state = json.loads(str(data["marginalized_output_state_json"]))
+            if marginalized_names:
+                emulator._marginalized_param_names = marginalized_names
+                emulator._marginalized_coefficients = marginalized_coefficients
+                emulator._marginalized_output_state = marginalized_state
             return emulator

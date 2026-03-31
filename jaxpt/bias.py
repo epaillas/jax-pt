@@ -166,3 +166,62 @@ def galaxy_multipoles(
         components=components,
         metadata={"backend": basis.metadata.get("backend", "unknown"), "z": basis.z},
     )
+
+
+def galaxy_multipole_templates(
+    basis: BasisSpectra,
+    params: Mapping[str, float],
+    names: tuple[str, ...] | None = None,
+) -> dict[str, MultipolePrediction]:
+    """Return linear multipole templates for nuisance parameters.
+
+    Templates are defined around the current parameter baseline, so the full
+    prediction can be written as ``P(fiducial) + A (x - x_fiducial)`` for the
+    returned nuisance subset.
+    """
+    requested = ("cs0", "cs2", "cs4", "Pshot", "b4") if names is None else tuple(str(name) for name in names)
+    unknown = sorted(set(requested) - {"cs0", "cs2", "cs4", "Pshot", "b4"})
+    if unknown:
+        raise ValueError(f"Unsupported multipole template parameters: {', '.join(unknown)}.")
+
+    h = basis.h
+    f = basis.growth_rate
+    b1 = _p(params, "b1")
+    b4_shape = (35.0 / 8.0) * _c(basis, "rsd_l4_counterterm_shape") * h
+    b4_common = f**2 * _c(basis, "k_over_h_squared") * b4_shape
+
+    zero = jnp.zeros_like(_c(basis, "rsd_l0_mm_00"))
+    one = jnp.ones_like(zero)
+
+    templates: dict[str, MultipolePrediction] = {}
+    for name in requested:
+        if name == "cs0":
+            p0 = 2.0 * _c(basis, "rsd_l0_counterterm_shape") * h
+            p2 = zero
+            p4 = zero
+        elif name == "cs2":
+            p0 = zero
+            p2 = 2.0 * _c(basis, "rsd_l2_counterterm_shape") * h
+            p4 = zero
+        elif name == "cs4":
+            p0 = zero
+            p2 = zero
+            p4 = 2.0 * _c(basis, "rsd_l4_counterterm_shape") * h
+        elif name == "Pshot":
+            p0 = one
+            p2 = zero
+            p4 = zero
+        else:
+            p0 = b4_common * (f**2 / 9.0 + 2.0 * f * b1 / 7.0 + b1**2 / 5.0)
+            p2 = b4_common * ((f**2 * 70.0 + 165.0 * f * b1 + 99.0 * b1**2) * 4.0 / 693.0)
+            p4 = b4_common * ((f**2 * 210.0 + 390.0 * f * b1 + 143.0 * b1**2) * 8.0 / 5005.0)
+
+        templates[name] = MultipolePrediction(
+            k=basis.k,
+            p0=p0,
+            p2=p2,
+            p4=p4,
+            metadata={"backend": basis.metadata.get("backend", "unknown"), "z": basis.z},
+        )
+
+    return templates
