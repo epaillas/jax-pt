@@ -25,7 +25,7 @@ def _build_small_mock_directory(tmp_path: Path, n_mocks: int = 4) -> Path:
     return directory
 
 
-def test_run_pocomc_inference_script_smoke(tmp_path) -> None:
+def _build_chain(tmp_path: Path) -> Path:
     pytest.importorskip("pocomc")
 
     k_data, _ = load_pgg_data_vector(DATA_VECTOR_PATH, ells=(0, 2, 4), rebin=13, kmin=0.01, kmax=0.2)
@@ -61,15 +61,14 @@ def test_run_pocomc_inference_script_smoke(tmp_path) -> None:
         param_names=["b1"],
         step_sizes={"b1": 0.05},
         cache_dir=tmp_path,
-        metadata={"script": "test_run_pocomc_inference_script"},
+        metadata={"script": "test_plot_bestfit_pgg_chain_script"},
     )
     assert emulator.cache_path is not None
 
     mock_dir = _build_small_mock_directory(tmp_path)
     output = tmp_path / "posterior.npz"
     script = REPO_ROOT / "scripts" / "run_pocomc_inference.py"
-
-    result = subprocess.run(
+    subprocess.run(
         [
             sys.executable,
             str(script),
@@ -103,23 +102,55 @@ def test_run_pocomc_inference_script_smoke(tmp_path) -> None:
         capture_output=True,
         text=True,
     )
+    return output
+
+
+def test_plot_bestfit_pgg_chain_script_smoke(tmp_path: Path) -> None:
+    chain = _build_chain(tmp_path)
+    output = tmp_path / "bestfit.png"
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "plot_bestfit_pgg_chain.py"),
+            str(chain),
+            "--output",
+            str(output),
+            "--n-fine",
+            "64",
+        ],
+        cwd=REPO_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
     assert output.exists()
-    with np.load(output, allow_pickle=False) as data:
-        assert data["samples"].ndim == 2
-        assert data["samples"].shape[1] == 1
-        assert data["weights"].ndim == 1
-        assert data["parameter_names"].tolist() == ["b1"]
-        assert str(data["meta_observable"]) == "pgg"
-        assert str(data["meta_model_kind"]) == "taylor_emulator_pgg"
-        assert str(data["meta_bestfit_rule"]) == "max_logl"
-        np.testing.assert_allclose(np.asarray(data["meta_k"], dtype=float), k_data)
-        assert tuple(np.asarray(data["meta_ells"], dtype=int)) == (0, 2, 4)
-        assert np.asarray(data["meta_data_vector"], dtype=float).shape == (len(k_data) * 3,)
-        assert np.asarray(data["meta_covariance"], dtype=float).shape == (len(k_data) * 3, len(k_data) * 3)
-        assert np.asarray(data["meta_errors"], dtype=float).shape == (len(k_data) * 3,)
-        assert np.asarray(data["meta_baseline_param_names"], dtype=str).size == np.asarray(data["meta_baseline_param_values"], dtype=float).size
-    assert "PocoMC inference" in result.stdout
-    assert "sampled parameters (1): b1" in result.stdout
-    assert "covariance_cache:" in result.stdout
-    assert "posterior_samples:" in result.stdout
+    assert output.stat().st_size > 0
+    assert "Best-fit Pgg plot" in result.stdout
+    assert "bestfit_index:" in result.stdout
+    assert "n_k_theory: 64" in result.stdout
+
+
+def test_plot_bestfit_pgg_chain_script_requires_self_describing_metadata(tmp_path: Path) -> None:
+    legacy_chain = tmp_path / "legacy_chain.npz"
+    np.savez(
+        legacy_chain,
+        samples=np.asarray([[1.0]], dtype=float),
+        logl=np.asarray([0.0], dtype=float),
+        parameter_names=np.asarray(["b1"], dtype=str),
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "plot_bestfit_pgg_chain.py"),
+            str(legacy_chain),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "missing required plotting metadata keys" in result.stderr

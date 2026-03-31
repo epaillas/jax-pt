@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import dataclass
+import json
 from pathlib import Path
 import sys
 
@@ -12,6 +14,7 @@ import numpy as np
 
 from jaxpt import PocoMCSampler, TaylorEmulator, cached_sample_covariance, repo_cache_dir
 from jaxpt.parameter import ParameterCollection
+from jaxpt.reference.classpt import MultipolePrediction
 from jaxpt.utils import flatten_pgg_measurements, load_pgg_data_vector
 
 
@@ -141,11 +144,66 @@ def _format_summary(name: str, values: np.ndarray, weights: np.ndarray) -> str:
     return f"{name}: mean={mean:.6g}, std={np.sqrt(max(variance, 0.0)):.6g}"
 
 
+def _load_emulator_config(path: Path) -> dict[str, object]:
+    with np.load(path, allow_pickle=False) as data:
+        return json.loads(str(data["config_json"]))
+
+
+def _baseline_parameter_arrays(emulator: TaylorEmulator) -> tuple[np.ndarray, np.ndarray]:
+    names = np.asarray([str(name) for name in emulator.fiducial], dtype=str)
+    values = np.asarray([float(emulator.fiducial[str(name)]) for name in names], dtype=float)
+    return names, values
+
+
+@dataclass(slots=True)
+class _MatchedKModel:
+    """Project multipole predictions onto the likelihood k-grid."""
+
+    model: TaylorEmulator
+    k_target: np.ndarray
+    atol: float = 1.0e-12
+    rtol: float = 1.0e-10
+
+    @property
+    def params(self) -> ParameterCollection:
+        return self.model.params
+
+    @property
+    def param_names(self) -> tuple[str, ...]:
+        return tuple(str(name) for name in self.model.param_names)
+
+    def predict(self, parameters: dict[str, float]) -> MultipolePrediction | np.ndarray:
+        prediction = self.model.predict(parameters)
+        if not isinstance(prediction, MultipolePrediction):
+            return prediction
+
+        source_k = np.asarray(prediction.k, dtype=float).reshape(-1)
+        target_k = np.asarray(self.k_target, dtype=float).reshape(-1)
+        if source_k.shape == target_k.shape and np.allclose(source_k, target_k, rtol=self.rtol, atol=self.atol):
+            return prediction
+        if target_k[0] < source_k[0] - self.atol or target_k[-1] > source_k[-1] + self.atol:
+            raise ValueError(
+                "Likelihood k-grid extends beyond the emulator support: "
+                f"[{target_k[0]:.6g}, {target_k[-1]:.6g}] vs "
+                f"[{source_k[0]:.6g}, {source_k[-1]:.6g}]."
+            )
+
+        return MultipolePrediction(
+            k=target_k,
+            p0=np.interp(target_k, source_k, np.asarray(prediction.p0, dtype=float).reshape(-1)),
+            p2=np.interp(target_k, source_k, np.asarray(prediction.p2, dtype=float).reshape(-1)),
+            p4=np.interp(target_k, source_k, np.asarray(prediction.p4, dtype=float).reshape(-1)),
+            metadata=dict(prediction.metadata),
+        )
+
+
 def main() -> None:
     args = build_parser().parse_args()
     ells = tuple(int(ell) for ell in args.ells)
 
     emulator = TaylorEmulator.load(args.emulator)
+    emulator_config = _load_emulator_config(args.emulator)
+    emulator_metadata = dict(emulator_config.get("metadata", {}))
     sampled_parameters = tuple(str(name) for name in (args.param if args.param else emulator.param_names))
     prior_overrides = _build_prior_overrides(emulator, args.flat_prior, args.gaussian_prior)
 
@@ -163,9 +221,11 @@ def main() -> None:
     if args.covariance_jitter > 0.0:
         covariance = covariance + float(args.covariance_jitter) * np.eye(covariance.shape[0], dtype=float)
 
+    matched_model = _MatchedKModel(emulator, k_target=k_data)
+
     sampler = PocoMCSampler(
         data=data_vector,
-        model=emulator,
+        model=matched_model,
         covariance=covariance,
         priors=prior_overrides if len(prior_overrides) else None,
         parameter_names=sampled_parameters,
@@ -187,6 +247,8 @@ def main() -> None:
     posterior = sampler.posterior()
     output_path = args.output if args.output is not None else _default_output_path(args.emulator)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    baseline_names, baseline_values = _baseline_parameter_arrays(emulator)
+    errors = np.sqrt(np.diag(covariance))
     np.savez(
         output_path,
         samples=posterior["samples"],
@@ -194,6 +256,28 @@ def main() -> None:
         logl=posterior["logl"],
         logp=posterior["logp"],
         parameter_names=np.asarray(posterior["parameter_names"], dtype=str),
+        meta_observable=np.asarray("pgg"),
+        meta_model_kind=np.asarray("taylor_emulator_pgg"),
+        meta_bestfit_rule=np.asarray("max_logl"),
+        meta_emulator_path=np.asarray(str(args.emulator.resolve())),
+        meta_data_path=np.asarray(str(args.data.resolve())),
+        meta_mocks_path=np.asarray(str(args.mocks.resolve())),
+        meta_ells=np.asarray(ells, dtype=int),
+        meta_k=np.asarray(k_data, dtype=float),
+        meta_rebin=np.asarray(args.rebin, dtype=int),
+        meta_kmin=np.asarray(args.kmin, dtype=float),
+        meta_kmax=np.asarray(args.kmax, dtype=float),
+        meta_data_vector=np.asarray(data_vector, dtype=float),
+        meta_covariance=np.asarray(covariance, dtype=float),
+        meta_errors=np.asarray(errors, dtype=float),
+        meta_covariance_cache=np.asarray(str(covariance_cache_path.resolve())),
+        meta_covariance_jitter=np.asarray(args.covariance_jitter, dtype=float),
+        meta_z=np.asarray(float(emulator_metadata.get("z", 0.0)), dtype=float),
+        meta_provider=np.asarray(str(emulator_metadata.get("provider", "cosmoprimo"))),
+        meta_settings_json=np.asarray(json.dumps(emulator_metadata.get("settings", {}), sort_keys=True)),
+        meta_baseline_param_names=baseline_names,
+        meta_baseline_param_values=baseline_values,
+        meta_emulator_param_names=np.asarray([str(name) for name in emulator.param_names], dtype=str),
     )
 
     logz, dlogz = sampler.sampler.evidence()

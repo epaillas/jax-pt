@@ -87,6 +87,7 @@ def build_multipole_emulator(
         "emulator_kind": "multipole_taylor",
         "theory": theory.__class__.__name__,
         "backend": theory.template.settings.backend,
+        "provider": getattr(theory.template, "provider", "cosmoprimo"),
         "z": float(theory.z),
         "k": np.asarray(theory.k, dtype=float).tolist(),
         "settings": asdict(theory.template.settings),
