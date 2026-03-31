@@ -41,7 +41,7 @@ def _parse_pair_assignment(text: str, value_names: tuple[str, str]) -> tuple[str
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run PocoMC on a serialized jaxpt Taylor emulator using a Gaussian likelihood from HDF5 multipole measurements."
+        description="Run PocoMC on a serialized jaxpt Taylor emulator using a Gaussian likelihood from HDF5 multipole measurements. Input k is interpreted as h/Mpc."
     )
     parser.add_argument("emulator", type=Path, help="Path to a serialized Taylor emulator `.npz` file.")
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH, help="Path to the mean Pgg measurement HDF5 file.")
@@ -155,9 +155,58 @@ def _baseline_parameter_arrays(emulator: TaylorEmulator) -> tuple[np.ndarray, np
     return names, values
 
 
+def _resolve_h_value(parameters: dict[str, float], fiducial: dict[str, float]) -> float:
+    if "h" in parameters:
+        return float(parameters["h"])
+    if "h" in fiducial:
+        return float(fiducial["h"])
+    if "H0" in parameters:
+        return float(parameters["H0"]) / 100.0
+    if "H0" in fiducial:
+        return float(fiducial["H0"]) / 100.0
+    raise ValueError("Could not resolve h for k-unit conversion.")
+
+
+def _build_metadata_payload(
+    *,
+    emulator: TaylorEmulator,
+    emulator_metadata: dict[str, object],
+    emulator_path: Path,
+    data_path: Path,
+    mocks_path: Path,
+    ells: tuple[int, ...],
+    rebin: int,
+    kmin: float,
+    kmax: float,
+    covariance_cache_path: Path,
+    covariance_jitter: float,
+) -> dict[str, object]:
+    baseline_names, baseline_values = _baseline_parameter_arrays(emulator)
+    return {
+        "observable": "pgg",
+        "model_kind": "taylor_emulator_pgg",
+        "bestfit_rule": "max_logl",
+        "emulator_path": str(emulator_path.resolve()),
+        "data_path": str(data_path.resolve()),
+        "mocks_path": str(mocks_path.resolve()),
+        "ells": [int(ell) for ell in ells],
+        "k_units": "h/Mpc",
+        "rebin": int(rebin),
+        "kmin": float(kmin),
+        "kmax": float(kmax),
+        "covariance_cache": str(covariance_cache_path.resolve()),
+        "covariance_jitter": float(covariance_jitter),
+        "z": float(emulator_metadata.get("z", 0.0)),
+        "provider": str(emulator_metadata.get("provider", "cosmoprimo")),
+        "settings": emulator_metadata.get("settings", {}),
+        "baseline": {str(name): float(value) for name, value in zip(baseline_names, baseline_values, strict=True)},
+        "emulator_param_names": [str(name) for name in emulator.param_names],
+    }
+
+
 @dataclass(slots=True)
 class _FixedKModel:
-    """Bind an emulator to a fixed likelihood k-grid."""
+    """Bind an emulator to a fixed likelihood k-grid in h/Mpc."""
 
     model: TaylorEmulator
     k_target: np.ndarray
@@ -171,7 +220,8 @@ class _FixedKModel:
         return tuple(str(name) for name in self.model.param_names)
 
     def predict(self, parameters: dict[str, float]) -> MultipolePrediction | np.ndarray:
-        return self.model.predict(parameters, k=self.k_target)
+        h = _resolve_h_value(parameters, self.model.fiducial)
+        return self.model.predict(parameters, k=h * np.asarray(self.k_target, dtype=float))
 
     def marginalized_design_matrix(
         self,
@@ -179,8 +229,13 @@ class _FixedKModel:
         *,
         parameter_names: tuple[str, ...] | list[str] | None = None,
     ) -> np.ndarray:
+        h = _resolve_h_value(parameters, self.model.fiducial)
         return np.asarray(
-            self.model.marginalized_design_matrix(parameters, parameter_names=parameter_names, k=self.k_target),
+            self.model.marginalized_design_matrix(
+                parameters,
+                parameter_names=parameter_names,
+                k=h * np.asarray(self.k_target, dtype=float),
+            ),
             dtype=float,
         )
 
@@ -236,8 +291,20 @@ def main() -> None:
     posterior = sampler.posterior()
     output_path = args.output if args.output is not None else _default_output_path(args.emulator)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    baseline_names, baseline_values = _baseline_parameter_arrays(emulator)
     errors = np.sqrt(np.diag(covariance))
+    metadata = _build_metadata_payload(
+        emulator=emulator,
+        emulator_metadata=emulator_metadata,
+        emulator_path=args.emulator,
+        data_path=args.data,
+        mocks_path=args.mocks,
+        ells=ells,
+        rebin=args.rebin,
+        kmin=args.kmin,
+        kmax=args.kmax,
+        covariance_cache_path=covariance_cache_path,
+        covariance_jitter=args.covariance_jitter,
+    )
     np.savez(
         output_path,
         samples=posterior["samples"],
@@ -245,28 +312,11 @@ def main() -> None:
         logl=posterior["logl"],
         logp=posterior["logp"],
         parameter_names=np.asarray(posterior["parameter_names"], dtype=str),
-        meta_observable=np.asarray("pgg"),
-        meta_model_kind=np.asarray("taylor_emulator_pgg"),
-        meta_bestfit_rule=np.asarray("max_logl"),
-        meta_emulator_path=np.asarray(str(args.emulator.resolve())),
-        meta_data_path=np.asarray(str(args.data.resolve())),
-        meta_mocks_path=np.asarray(str(args.mocks.resolve())),
-        meta_ells=np.asarray(ells, dtype=int),
-        meta_k=np.asarray(k_data, dtype=float),
-        meta_rebin=np.asarray(args.rebin, dtype=int),
-        meta_kmin=np.asarray(args.kmin, dtype=float),
-        meta_kmax=np.asarray(args.kmax, dtype=float),
-        meta_data_vector=np.asarray(data_vector, dtype=float),
-        meta_covariance=np.asarray(covariance, dtype=float),
-        meta_errors=np.asarray(errors, dtype=float),
-        meta_covariance_cache=np.asarray(str(covariance_cache_path.resolve())),
-        meta_covariance_jitter=np.asarray(args.covariance_jitter, dtype=float),
-        meta_z=np.asarray(float(emulator_metadata.get("z", 0.0)), dtype=float),
-        meta_provider=np.asarray(str(emulator_metadata.get("provider", "cosmoprimo"))),
-        meta_settings_json=np.asarray(json.dumps(emulator_metadata.get("settings", {}), sort_keys=True)),
-        meta_baseline_param_names=baseline_names,
-        meta_baseline_param_values=baseline_values,
-        meta_emulator_param_names=np.asarray([str(name) for name in emulator.param_names], dtype=str),
+        metadata_json=np.asarray(json.dumps(metadata, sort_keys=True)),
+        k=np.asarray(k_data, dtype=float),
+        data_vector=np.asarray(data_vector, dtype=float),
+        covariance=np.asarray(covariance, dtype=float),
+        errors=np.asarray(errors, dtype=float),
     )
 
     logz, dlogz = sampler.sampler.evidence()

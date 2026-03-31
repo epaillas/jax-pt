@@ -50,7 +50,7 @@ def _build_chain(tmp_path: Path) -> Path:
         settings=PTSettings(backend="jaxpt", ir_resummation=False),
         provider="cosmoprimo",
     )
-    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=k_data)
+    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=float(cosmology["h"]) * k_data)
     for name in theory.template.params.names():
         theory.params[name].update(fixed=True)
     theory.params["b1"].update(value=2.0)
@@ -130,6 +130,7 @@ def test_plot_bestfit_pgg_chain_script_smoke(tmp_path: Path) -> None:
     assert "Best-fit Pgg plot" in result.stdout
     assert "bestfit_index:" in result.stdout
     assert "n_k_theory: 64" in result.stdout
+    assert "Pshot (conditional):" in result.stdout
 
 
 def test_plot_bestfit_pgg_chain_script_requires_self_describing_metadata(tmp_path: Path) -> None:

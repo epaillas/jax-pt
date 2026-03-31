@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -50,7 +51,7 @@ def test_run_pocomc_inference_script_smoke(tmp_path) -> None:
         settings=PTSettings(backend="jaxpt", ir_resummation=False),
         provider="cosmoprimo",
     )
-    train_k = np.linspace(0.01, 0.2, len(k_data) + 9)
+    train_k = np.linspace(float(cosmology["h"]) * 0.01, float(cosmology["h"]) * 0.2, len(k_data) + 9)
     theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=train_k)
     for name in theory.template.params.names():
         theory.params[name].update(fixed=True)
@@ -111,15 +112,17 @@ def test_run_pocomc_inference_script_smoke(tmp_path) -> None:
         assert data["samples"].shape[1] == 1
         assert data["weights"].ndim == 1
         assert data["parameter_names"].tolist() == ["b1"]
-        assert str(data["meta_observable"]) == "pgg"
-        assert str(data["meta_model_kind"]) == "taylor_emulator_pgg"
-        assert str(data["meta_bestfit_rule"]) == "max_logl"
-        np.testing.assert_allclose(np.asarray(data["meta_k"], dtype=float), k_data)
-        assert tuple(np.asarray(data["meta_ells"], dtype=int)) == (0, 2, 4)
-        assert np.asarray(data["meta_data_vector"], dtype=float).shape == (len(k_data) * 3,)
-        assert np.asarray(data["meta_covariance"], dtype=float).shape == (len(k_data) * 3, len(k_data) * 3)
-        assert np.asarray(data["meta_errors"], dtype=float).shape == (len(k_data) * 3,)
-        assert np.asarray(data["meta_baseline_param_names"], dtype=str).size == np.asarray(data["meta_baseline_param_values"], dtype=float).size
+        metadata = json.loads(str(data["metadata_json"]))
+        assert metadata["observable"] == "pgg"
+        assert metadata["model_kind"] == "taylor_emulator_pgg"
+        assert metadata["bestfit_rule"] == "max_logl"
+        assert metadata["k_units"] == "h/Mpc"
+        np.testing.assert_allclose(np.asarray(data["k"], dtype=float), k_data)
+        assert tuple(int(ell) for ell in metadata["ells"]) == (0, 2, 4)
+        assert np.asarray(data["data_vector"], dtype=float).shape == (len(k_data) * 3,)
+        assert np.asarray(data["covariance"], dtype=float).shape == (len(k_data) * 3, len(k_data) * 3)
+        assert np.asarray(data["errors"], dtype=float).shape == (len(k_data) * 3,)
+        assert len(metadata["baseline"]) > 0
     assert "PocoMC inference" in result.stdout
     assert "sampled parameters (1): b1" in result.stdout
     assert "covariance_cache:" in result.stdout
