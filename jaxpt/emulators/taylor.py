@@ -189,6 +189,74 @@ def _reconstruct_multipole_prediction(vector: np.ndarray, state: dict[str, Any])
     )
 
 
+def _project_multipole_prediction(
+    prediction: MultipolePrediction,
+    *,
+    k_target: np.ndarray,
+    atol: float = 1.0e-12,
+    rtol: float = 1.0e-10,
+) -> MultipolePrediction:
+    source_k = np.asarray(prediction.k, dtype=float).reshape(-1)
+    target_k = np.asarray(k_target, dtype=float).reshape(-1)
+    if source_k.shape == target_k.shape and np.allclose(source_k, target_k, rtol=rtol, atol=atol):
+        return prediction
+    if target_k[0] < source_k[0] - atol or target_k[-1] > source_k[-1] + atol:
+        raise ValueError(
+            "Requested k-grid extends beyond the emulator support: "
+            f"[{target_k[0]:.6g}, {target_k[-1]:.6g}] vs "
+            f"[{source_k[0]:.6g}, {source_k[-1]:.6g}]."
+        )
+    return MultipolePrediction(
+        k=target_k,
+        p0=np.interp(target_k, source_k, np.asarray(prediction.p0, dtype=float).reshape(-1)),
+        p2=np.interp(target_k, source_k, np.asarray(prediction.p2, dtype=float).reshape(-1)),
+        p4=np.interp(target_k, source_k, np.asarray(prediction.p4, dtype=float).reshape(-1)),
+        metadata=dict(prediction.metadata),
+    )
+
+
+def _project_marginalized_design_matrix(
+    matrix: np.ndarray,
+    *,
+    k_source: np.ndarray,
+    k_target: np.ndarray,
+    atol: float = 1.0e-12,
+    rtol: float = 1.0e-10,
+) -> np.ndarray:
+    source_k = np.asarray(k_source, dtype=float).reshape(-1)
+    target_k = np.asarray(k_target, dtype=float).reshape(-1)
+    array = np.asarray(matrix, dtype=float)
+    if source_k.shape == target_k.shape and np.allclose(source_k, target_k, rtol=rtol, atol=atol):
+        return array
+    if target_k[0] < source_k[0] - atol or target_k[-1] > source_k[-1] + atol:
+        raise ValueError(
+            "Requested k-grid extends beyond the emulator support: "
+            f"[{target_k[0]:.6g}, {target_k[-1]:.6g}] vs "
+            f"[{source_k[0]:.6g}, {source_k[-1]:.6g}]."
+        )
+
+    n_source = source_k.size
+    if array.ndim != 2:
+        raise ValueError("Marginalized design matrix must be two-dimensional before k projection.")
+    if array.shape[0] != n_source * 3:
+        raise ValueError(
+            f"Marginalized design matrix row count {array.shape[0]} does not match ell-major multipole layout for {n_source} k values."
+        )
+    columns = []
+    for index in range(array.shape[1]):
+        source_column = np.asarray(array[:, index], dtype=float).reshape(3, n_source)
+        columns.append(
+            np.concatenate(
+                [
+                    np.interp(target_k, source_k, source_column[0]),
+                    np.interp(target_k, source_k, source_column[1]),
+                    np.interp(target_k, source_k, source_column[2]),
+                ]
+            )
+        )
+    return np.column_stack(columns) if columns else np.zeros((target_k.size * 3, 0), dtype=float)
+
+
 _ARRAY_OUTPUT_ADAPTER = _OutputAdapter(
     tag="array",
     flatten=_flatten_array_output,
@@ -528,7 +596,7 @@ class TaylorEmulator:
         monomials = np.prod(np.power(deltas[None, :], self._powers, dtype=float), axis=1)
         return monomials @ self._coefficients
 
-    def predict(self, parameters: Mapping[str, float] | None = None, **kwargs: float) -> Any:
+    def predict(self, parameters: Mapping[str, float] | None = None, *, k: np.ndarray | None = None, **kwargs: float) -> Any:
         """Evaluate the emulator for a flat parameter query.
 
         Parameters
@@ -550,7 +618,12 @@ class TaylorEmulator:
         vector = self._predict_vector(query)
         assert self._output_adapter is not None
         assert self._output_state is not None
-        return self._output_adapter.reconstruct(vector, self._output_state)
+        prediction = self._output_adapter.reconstruct(vector, self._output_state)
+        if k is None:
+            return prediction
+        if not isinstance(prediction, MultipolePrediction):
+            raise ValueError("TaylorEmulator only supports `k=` for MultipolePrediction outputs.")
+        return _project_multipole_prediction(prediction, k_target=np.asarray(k, dtype=float))
 
     def attach_marginalized_design(
         self,
@@ -568,6 +641,7 @@ class TaylorEmulator:
         parameters: Mapping[str, float] | None = None,
         *,
         parameter_names: list[str] | tuple[str, ...] | None = None,
+        k: np.ndarray | None = None,
         **kwargs: float,
     ) -> np.ndarray:
         if self._marginalized_coefficients is None or self._marginalized_output_state is None:
@@ -583,6 +657,14 @@ class TaylorEmulator:
         array = np.asarray(matrix, dtype=float)
         if array.ndim != 2:
             raise ValueError("Serialized marginalized design matrix must reconstruct to a two-dimensional array.")
+        if k is not None:
+            if self._output_state is None or "k" not in self._output_state:
+                raise ValueError("TaylorEmulator only supports marginalized design-matrix `k=` projection for multipole outputs.")
+            array = _project_marginalized_design_matrix(
+                array,
+                k_source=np.asarray(self._output_state["k"], dtype=float),
+                k_target=np.asarray(k, dtype=float),
+            )
         if parameter_names is None:
             return array
         requested = tuple(str(name) for name in parameter_names)

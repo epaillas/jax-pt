@@ -114,6 +114,54 @@ def test_taylor_emulator_reconstructs_multipole_predictions() -> None:
     assert prediction.metadata == expected.metadata
 
 
+def test_taylor_emulator_projects_multipole_predictions_to_requested_k() -> None:
+    k = np.array([0.05, 0.1, 0.15], dtype=float)
+
+    def theory(params: dict[str, float]) -> MultipolePrediction:
+        alpha = params["alpha"]
+        return MultipolePrediction(
+            k=k,
+            p0=1.0 + alpha + 2.0 * k,
+            p2=-0.5 + alpha * k,
+            p4=2.0 - k,
+            metadata={"backend": "synthetic"},
+        )
+
+    emulator = TaylorEmulator(
+        theory,
+        fiducial={"alpha": 0.0},
+        order=1,
+        step_sizes={"alpha": 0.1},
+    ).build()
+
+    target_k = np.array([0.075, 0.125], dtype=float)
+    projected = emulator.predict({"alpha": 0.2}, k=target_k)
+    assert isinstance(projected, MultipolePrediction)
+    np.testing.assert_allclose(projected.k, target_k, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(projected.p0, 1.0 + 0.2 + 2.0 * target_k, rtol=1e-11, atol=1e-11)
+    np.testing.assert_allclose(projected.p2, -0.5 + 0.2 * target_k, rtol=1e-11, atol=1e-11)
+    np.testing.assert_allclose(projected.p4, 2.0 - target_k, rtol=1e-11, atol=1e-11)
+
+
+def test_taylor_emulator_rejects_out_of_range_k_projection() -> None:
+    k = np.array([0.05, 0.1, 0.15], dtype=float)
+
+    emulator = TaylorEmulator(
+        lambda params: MultipolePrediction(
+            k=k,
+            p0=np.asarray([params["alpha"]] * 3, dtype=float),
+            p2=np.asarray([0.0, 0.0, 0.0], dtype=float),
+            p4=np.asarray([0.0, 0.0, 0.0], dtype=float),
+        ),
+        fiducial={"alpha": 0.0},
+        order=1,
+        step_sizes={"alpha": 0.1},
+    ).build()
+
+    with pytest.raises(ValueError, match="extends beyond the emulator support"):
+        emulator.predict({"alpha": 0.0}, k=np.array([0.04, 0.1], dtype=float))
+
+
 def test_taylor_emulator_save_load_and_hash_cache(tmp_path) -> None:
     def theory(params: dict[str, float]) -> np.ndarray:
         x = params["x"]
@@ -217,6 +265,70 @@ def test_taylor_emulator_serializes_marginalized_design_matrix(tmp_path) -> None
     np.testing.assert_allclose(
         loaded.marginalized_design_matrix({"x": 0.3}, parameter_names=("a",)),
         np.asarray([[2.3]], dtype=float),
+        rtol=1e-11,
+        atol=1e-11,
+    )
+
+
+def test_taylor_emulator_projects_marginalized_design_matrix_to_requested_k(tmp_path) -> None:
+    k = np.array([0.05, 0.1, 0.15], dtype=float)
+    emulator = TaylorEmulator(
+        lambda query: MultipolePrediction(
+            k=k,
+            p0=1.0 + query["x"] * k,
+            p2=2.0 + query["x"] * k,
+            p4=3.0 + query["x"] * k,
+        ),
+        fiducial={"x": 0.0, "a": 1.5},
+        order=1,
+        step_sizes={"x": 0.1},
+        param_names=["x"],
+        valid_param_names=["x", "a"],
+        params=ParameterCollection(
+            {
+                "x": {"value": 0.0},
+                "a": {"value": 1.5, "marginalized": True},
+            }
+        ),
+    ).build()
+    template_emulator = TaylorEmulator(
+        lambda query: np.asarray(
+            [
+                np.concatenate(
+                    [
+                        10.0 + query["x"] + k,
+                        20.0 + query["x"] + k,
+                        30.0 + query["x"] + k,
+                    ]
+                )
+            ],
+            dtype=float,
+        ).T,
+        fiducial={"x": 0.0, "a": 1.5},
+        order=1,
+        step_sizes={"x": 0.1},
+        param_names=["x"],
+        valid_param_names=["x", "a"],
+    ).build()
+    assert template_emulator._coefficients is not None
+    assert template_emulator._output_state is not None
+    emulator.attach_marginalized_design(["a"], template_emulator._coefficients, template_emulator._output_state)
+
+    path = tmp_path / "projected_design_emulator.npz"
+    emulator.save(path)
+    loaded = TaylorEmulator.load(path)
+
+    target_k = np.array([0.075, 0.125], dtype=float)
+    expected = np.concatenate(
+        [
+            10.0 + 0.3 + target_k,
+            20.0 + 0.3 + target_k,
+            30.0 + 0.3 + target_k,
+        ]
+    )[:, None]
+    np.testing.assert_allclose(
+        loaded.marginalized_design_matrix({"x": 0.3}, parameter_names=("a",), k=target_k),
+        expected,
         rtol=1e-11,
         atol=1e-11,
     )

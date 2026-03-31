@@ -50,7 +50,8 @@ def test_run_pocomc_inference_script_smoke(tmp_path) -> None:
         settings=PTSettings(backend="jaxpt", ir_resummation=False),
         provider="cosmoprimo",
     )
-    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=k_data)
+    train_k = np.linspace(0.01, 0.2, len(k_data) + 9)
+    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=train_k)
     for name in theory.template.params.names():
         theory.params[name].update(fixed=True)
     theory.params["b1"].update(value=2.0)

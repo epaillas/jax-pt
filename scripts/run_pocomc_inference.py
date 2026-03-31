@@ -156,13 +156,11 @@ def _baseline_parameter_arrays(emulator: TaylorEmulator) -> tuple[np.ndarray, np
 
 
 @dataclass(slots=True)
-class _MatchedKModel:
-    """Project multipole predictions onto the likelihood k-grid."""
+class _FixedKModel:
+    """Bind an emulator to a fixed likelihood k-grid."""
 
     model: TaylorEmulator
     k_target: np.ndarray
-    atol: float = 1.0e-12
-    rtol: float = 1.0e-10
 
     @property
     def params(self) -> ParameterCollection:
@@ -173,28 +171,7 @@ class _MatchedKModel:
         return tuple(str(name) for name in self.model.param_names)
 
     def predict(self, parameters: dict[str, float]) -> MultipolePrediction | np.ndarray:
-        prediction = self.model.predict(parameters)
-        if not isinstance(prediction, MultipolePrediction):
-            return prediction
-
-        source_k = np.asarray(prediction.k, dtype=float).reshape(-1)
-        target_k = np.asarray(self.k_target, dtype=float).reshape(-1)
-        if source_k.shape == target_k.shape and np.allclose(source_k, target_k, rtol=self.rtol, atol=self.atol):
-            return prediction
-        if target_k[0] < source_k[0] - self.atol or target_k[-1] > source_k[-1] + self.atol:
-            raise ValueError(
-                "Likelihood k-grid extends beyond the emulator support: "
-                f"[{target_k[0]:.6g}, {target_k[-1]:.6g}] vs "
-                f"[{source_k[0]:.6g}, {source_k[-1]:.6g}]."
-            )
-
-        return MultipolePrediction(
-            k=target_k,
-            p0=np.interp(target_k, source_k, np.asarray(prediction.p0, dtype=float).reshape(-1)),
-            p2=np.interp(target_k, source_k, np.asarray(prediction.p2, dtype=float).reshape(-1)),
-            p4=np.interp(target_k, source_k, np.asarray(prediction.p4, dtype=float).reshape(-1)),
-            metadata=dict(prediction.metadata),
-        )
+        return self.model.predict(parameters, k=self.k_target)
 
     def marginalized_design_matrix(
         self,
@@ -202,36 +179,10 @@ class _MatchedKModel:
         *,
         parameter_names: tuple[str, ...] | list[str] | None = None,
     ) -> np.ndarray:
-        matrix = np.asarray(self.model.marginalized_design_matrix(parameters, parameter_names=parameter_names), dtype=float)
-        prediction = self.model.predict(parameters)
-        if not isinstance(prediction, MultipolePrediction):
-            return matrix
-
-        source_k = np.asarray(prediction.k, dtype=float).reshape(-1)
-        target_k = np.asarray(self.k_target, dtype=float).reshape(-1)
-        if source_k.shape == target_k.shape and np.allclose(source_k, target_k, rtol=self.rtol, atol=self.atol):
-            return matrix
-        if target_k[0] < source_k[0] - self.atol or target_k[-1] > source_k[-1] + self.atol:
-            raise ValueError(
-                "Likelihood k-grid extends beyond the emulator support: "
-                f"[{target_k[0]:.6g}, {target_k[-1]:.6g}] vs "
-                f"[{source_k[0]:.6g}, {source_k[-1]:.6g}]."
-            )
-
-        n_source = source_k.size
-        columns = []
-        for index in range(matrix.shape[1]):
-            source_column = np.asarray(matrix[:, index], dtype=float).reshape(3, n_source)
-            columns.append(
-                np.concatenate(
-                    [
-                        np.interp(target_k, source_k, source_column[0]),
-                        np.interp(target_k, source_k, source_column[1]),
-                        np.interp(target_k, source_k, source_column[2]),
-                    ]
-                )
-            )
-        return np.column_stack(columns) if columns else np.zeros((target_k.size * 3, 0), dtype=float)
+        return np.asarray(
+            self.model.marginalized_design_matrix(parameters, parameter_names=parameter_names, k=self.k_target),
+            dtype=float,
+        )
 
 
 def main() -> None:
@@ -259,7 +210,7 @@ def main() -> None:
     if args.covariance_jitter > 0.0:
         covariance = covariance + float(args.covariance_jitter) * np.eye(covariance.shape[0], dtype=float)
 
-    matched_model = _MatchedKModel(emulator, k_target=k_data)
+    matched_model = _FixedKModel(emulator, k_target=k_data)
 
     sampler = PocoMCSampler(
         data=data_vector,
