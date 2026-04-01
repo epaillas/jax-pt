@@ -1,19 +1,6 @@
-import os
-
 from jax import config as _jax_config
 
-
-def _resolve_enable_x64() -> bool:
-    override = os.environ.get("JAXPT_ENABLE_X64")
-    if override is not None:
-        return override.strip().lower() not in {"0", "false", "no", "off"}
-    platforms = os.environ.get("JAX_PLATFORMS", "")
-    if "METAL" in platforms.upper():
-        return False
-    return True
-
-
-_jax_config.update("jax_enable_x64", _resolve_enable_x64())
+_jax_config.update("jax_enable_x64", True)
 
 from .bias import galaxy_multipoles, galaxy_real_spectrum, matter_real_spectrum
 from .basis import build_realspace_predictor, compute_basis
