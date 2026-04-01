@@ -52,6 +52,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--warmup", type=int, default=5, help="Warmup iterations after the first compile call.")
     parser.add_argument("--repeat", type=int, default=30, help="Measured iterations per benchmark target.")
     parser.add_argument("--z", type=float, default=0.5, help="Redshift used in the synthetic linear input.")
+    parser.add_argument(
+        "--loop-order",
+        choices=("tree", "one_loop"),
+        default="one_loop",
+        help="Theory order for the native jaxpt kernels.",
+    )
     parser.add_argument("--output-json", type=Path, default=None, help="Optional path for machine-readable benchmark output.")
     parser.add_argument("--require-gpu", action="store_true", help="Exit with a non-zero code unless a non-CPU backend is visible.")
     return parser
@@ -130,7 +136,7 @@ def package_version(name: str) -> str | None:
 def main() -> int:
     args = build_parser().parse_args()
 
-    settings = PTSettings(ir_resummation=False)
+    settings = PTSettings(ir_resummation=False, loop_order=args.loop_order)
     eval_k = np.linspace(0.02, 0.18, args.nk)
     linear_input = make_linear_input(z=args.z, support_nk=args.support_nk)
 
@@ -180,6 +186,7 @@ def main() -> int:
             "warmup": args.warmup,
             "repeat": args.repeat,
             "z": args.z,
+            "loop_order": args.loop_order,
         },
         "benchmarks": {
             "realspace_native": time_callable(lambda: realspace_predictor(**realspace_args), warmup=args.warmup, repeat=args.repeat),

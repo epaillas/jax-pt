@@ -120,7 +120,7 @@ Then verify the active backend and benchmark the native JAX kernels with:
 
 ```bash
 python scripts/benchmark_jax_backend.py --output-json scripts/benchmark_outputs/jax_backend_cpu.json
-JAX_PLATFORMS=metal python scripts/benchmark_jax_backend.py --require-gpu --output-json scripts/benchmark_outputs/jax_backend_metal.json
+JAX_PLATFORMS=METAL python scripts/benchmark_jax_backend.py --require-gpu --output-json scripts/benchmark_outputs/jax_backend_metal.json
 ```
 
 The benchmark targets the native JAX core only:
@@ -130,6 +130,14 @@ The benchmark targets the native JAX core only:
 
 Both timings synchronize with `.block_until_ready()` so the reported latencies
 reflect actual device execution rather than queued dispatch.
+
+`jaxpt` defaults to 64-bit mode on CPU, but when `JAX_PLATFORMS=METAL` it
+automatically leaves JAX in 32-bit mode because Apple Metal does not support
+the `float64`/`complex128` traces used by the native kernels.
+
+At the moment, tree-level native predictions run on Metal, but the one-loop
+FFTLog path still fails on `jax-metal==0.1.1` because the backend does not
+legalize the `mhlo.fft` operation emitted by `jnp.fft.fft`.
 
 ## Emulator Training
 
