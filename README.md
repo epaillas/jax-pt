@@ -101,6 +101,36 @@ pytest -q
 
 The suite includes direct comparisons against the installed `CLASS-PT` backend where available.
 
+## Apple Metal Benchmarking
+
+This repository includes a separate Apple Silicon benchmark environment at
+[`envs/apple-metal-jax-benchmark.yml`](/Users/epaillas/code/jax-pt/envs/apple-metal-jax-benchmark.yml).
+It is intentionally isolated from the main project environment because Apple
+Metal support uses a separate JAX plugin stack and may require older pinned
+`jax`/`jaxlib` versions than the rest of the repo.
+
+Create the benchmark environment with:
+
+```bash
+conda env create -f envs/apple-metal-jax-benchmark.yml
+conda activate jaxpt-apple-metal-benchmark
+```
+
+Then verify the active backend and benchmark the native JAX kernels with:
+
+```bash
+python scripts/benchmark_jax_backend.py --output-json scripts/benchmark_outputs/jax_backend_cpu.json
+JAX_PLATFORMS=metal python scripts/benchmark_jax_backend.py --require-gpu --output-json scripts/benchmark_outputs/jax_backend_metal.json
+```
+
+The benchmark targets the native JAX core only:
+
+- `build_realspace_predictor(...)`
+- `GalaxyPowerSpectrumMultipolesTheory._predict_multipoles(...)`
+
+Both timings synchronize with `.block_until_ready()` so the reported latencies
+reflect actual device execution rather than queued dispatch.
+
 ## Emulator Training
 
 Build a hashed Taylor emulator for the multipole theory with:
