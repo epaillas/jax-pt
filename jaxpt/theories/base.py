@@ -73,17 +73,18 @@ def normalize_nuisance_params(
         Optional full default mapping to merge into. If omitted, the package
         nuisance defaults are used.
     """
-    allowed = set(_NUISANCE_PARAM_NAMES)
-    extra = sorted(set(parameters) - allowed)
     merged = dict(_NUISANCE_DEFAULTS if defaults is None else defaults)
+    allowed = set(merged)
+    names = tuple(_NUISANCE_PARAM_NAMES if defaults is None else merged)
+    extra = sorted(set(parameters) - allowed)
     if extra:
         raise ValueError(f"unexpected parameters: {', '.join(extra)}")
     for name, value in parameters.items():
         merged[name] = float(value)
-    missing = [name for name in _NUISANCE_PARAM_NAMES if name not in merged]
+    missing = [name for name in names if name not in merged]
     if missing:
         raise ValueError(f"missing required parameters: {', '.join(missing)}")
-    return {name: float(merged[name]) for name in _NUISANCE_PARAM_NAMES}
+    return {name: float(merged[name]) for name in names}
 
 
 def finalize_multipole_prediction(

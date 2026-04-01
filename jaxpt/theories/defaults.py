@@ -44,3 +44,8 @@ def load_power_spectrum_template_parameters() -> ParameterCollection:
 def load_galaxy_power_spectrum_multipoles_parameters() -> ParameterCollection:
     """Load the packaged default nuisance-parameter catalog for multipoles."""
     return _load_yaml_parameters("galaxy_power_spectrum_multipoles.yaml", kind_key="theory")
+
+
+def load_density_split_galaxy_power_spectrum_multipoles_parameters() -> ParameterCollection:
+    """Load the packaged default nuisance-parameter catalog for density-split multipoles."""
+    return _load_yaml_parameters("density_split_galaxy_power_spectrum_multipoles.yaml", kind_key="theory")
