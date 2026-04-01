@@ -13,6 +13,15 @@ from ..cosmology import FFTLogInput, LinearPowerInput, prepare_fftlog_input
 
 _EPS = 1.0e-6
 _CUTOFF_OVER_H = 3.0
+_REALSPACE_TERM_NAMES = (
+    "real_loop_matter",
+    "real_loop_b2_b2",
+    "real_cross_b1_b2",
+    "real_cross_b1_bG2",
+    "real_loop_b2_bG2",
+    "real_loop_bG2_bG2",
+    "real_gamma3",
+)
 
 
 def _j_np(nu: np.ndarray, mu: np.ndarray) -> np.ndarray:
@@ -199,6 +208,101 @@ def _interpolate_to_output_jax(kdisc: jnp.ndarray, values: jnp.ndarray, output_k
     return hermite
 
 
+@jax.jit
+def _interpolate_stack_to_output_jax(
+    kdisc: jnp.ndarray,
+    values: jnp.ndarray,
+    output_k: jnp.ndarray,
+) -> jnp.ndarray:
+    return jax.vmap(lambda row: _interpolate_to_output_jax(kdisc, row, output_k))(values)
+
+
+def _realspace_terms_dict_from_stack(values: jnp.ndarray) -> dict[str, jnp.ndarray]:
+    return {name: values[index] for index, name in enumerate(_REALSPACE_TERM_NAMES)}
+
+
+@partial(jax.jit, static_argnames=("settings",))
+def _compute_fftlog_realspace_terms_jitted(
+    kdisc: jnp.ndarray,
+    pk_linear: jnp.ndarray,
+    output_k: jnp.ndarray,
+    h: float,
+    settings: PTSettings,
+) -> jnp.ndarray:
+    if settings.kernel_source != "analytic":
+        raise NotImplementedError("FFTLog real-space loops only support kernel_source='analytic'.")
+
+    nmax = settings.fftlog_n
+    kernels = _analytic_realspace_kernel_registry(
+        nmax,
+        settings.fftlog_k0_over_h,
+        settings.fftlog_kmax_over_h,
+        settings.fftlog_bias_matter + settings.fftlog_bias,
+        settings.fftlog_bias_bias + settings.fftlog_bias,
+    )
+
+    etam = jnp.asarray(kernels["etam"])
+    etam2 = jnp.asarray(kernels["etam2"])
+    cmsym = _fftlog_coefficients_jax(
+        kdisc,
+        pk_linear,
+        kdisc,
+        etam,
+        settings.fftlog_bias_matter + settings.fftlog_bias,
+    )
+    cmsym2 = _fftlog_coefficients_jax(
+        kdisc,
+        pk_linear,
+        kdisc,
+        etam2,
+        settings.fftlog_bias_bias + settings.fftlog_bias,
+    )
+
+    logk = jnp.log(kdisc)
+    x = cmsym[:, None] * jnp.exp(etam[:, None] * logk[None, :])
+    x2 = cmsym2[:, None] * jnp.exp(etam2[:, None] * logk[None, :])
+
+    pbin = pk_linear
+    sigmav = jnp.trapezoid(kdisc * pk_linear, jnp.log(kdisc)) / (6.0 * jnp.pi**2)
+    cutoff = _CUTOFF_OVER_H * h
+    damping = jnp.exp(-jnp.power(kdisc / cutoff, 6.0))
+
+    m13 = jnp.asarray(kernels["m13"])
+    ifg2 = jnp.asarray(kernels["ifg2"])
+    m22 = jnp.asarray(kernels["m22"])
+    m22basic = jnp.asarray(kernels["m22basic"])
+    bias_id2 = jnp.asarray(kernels["bias_id2"])
+    bias_ig2 = jnp.asarray(kernels["bias_ig2"])
+    bias_id2g2 = jnp.asarray(kernels["bias_id2g2"])
+    bias_ig2g2 = jnp.asarray(kernels["bias_ig2g2"])
+
+    f13 = jnp.einsum("nk,n->k", x, m13)
+    p13_uv = -61.0 * pbin * kdisc**2 * sigmav / 105.0
+    p13 = (jnp.real(kdisc**3 * f13 * pbin) + p13_uv) * damping
+    p22 = jnp.real(kdisc**3 * _quadratic_form_columns(x, m22)) * damping
+
+    raw_id2d2 = jnp.real(kdisc**3 * (2.0 * _quadratic_form_columns(x2, m22basic)))
+    p_id2d2 = jnp.abs(raw_id2d2 - raw_id2d2[0] + _EPS)
+    p_id2 = jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_id2))
+    p_ig2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_ig2)))
+    p_id2g2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_id2g2)))
+    p_ig2g2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_ig2g2)))
+    p_ifg2 = jnp.abs(jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x2, ifg2) * pbin))
+
+    stacked_terms = jnp.stack(
+        (
+            p13 + p22,
+            -p_id2d2,
+            p_id2,
+            -p_ig2,
+            -p_id2g2,
+            p_ig2g2,
+            -p_ifg2,
+        )
+    )
+    return _interpolate_stack_to_output_jax(kdisc, stacked_terms, output_k)
+
+
 @partial(jax.jit, static_argnames=("settings",))
 def compute_fftlog_realspace_terms_from_arrays(
     support_k: jnp.ndarray,
@@ -227,73 +331,10 @@ def compute_fftlog_realspace_terms_from_arrays(
         raise NotImplementedError("FFTLog real-space loops only support kernel_source='analytic'.")
 
     nmax = settings.fftlog_n
-    kernels = _analytic_realspace_kernel_registry(
-        nmax,
-        settings.fftlog_k0_over_h,
-        settings.fftlog_kmax_over_h,
-        settings.fftlog_bias_matter + settings.fftlog_bias,
-        settings.fftlog_bias_bias + settings.fftlog_bias,
-    )
-
     delta = np.log(settings.fftlog_kmax_over_h / settings.fftlog_k0_over_h) / (nmax - 1.0)
     kdisc = settings.fftlog_k0_over_h * h * jnp.exp(jnp.arange(nmax, dtype=pk_linear.dtype) * delta)
-    etam = jnp.asarray(kernels["etam"])
-    etam2 = jnp.asarray(kernels["etam2"])
-    cmsym = _fftlog_coefficients_jax(
-        support_k,
-        pk_linear,
-        kdisc,
-        etam,
-        settings.fftlog_bias_matter + settings.fftlog_bias,
-    )
-    cmsym2 = _fftlog_coefficients_jax(
-        support_k,
-        pk_linear,
-        kdisc,
-        etam2,
-        settings.fftlog_bias_bias + settings.fftlog_bias,
-    )
-
-    logk = jnp.log(kdisc)
-    x = cmsym[:, None] * jnp.exp(etam[:, None] * logk[None, :])
-    x2 = cmsym2[:, None] * jnp.exp(etam2[:, None] * logk[None, :])
-
-    pbin = _loglog_interpolate_jax(kdisc, support_k, pk_linear)
-    sigmav = jnp.trapezoid(support_k * pk_linear, jnp.log(support_k)) / (6.0 * jnp.pi**2)
-    cutoff = _CUTOFF_OVER_H * h
-    damping = jnp.exp(-jnp.power(kdisc / cutoff, 6.0))
-
-    m13 = jnp.asarray(kernels["m13"])
-    ifg2 = jnp.asarray(kernels["ifg2"])
-    m22 = jnp.asarray(kernels["m22"])
-    m22basic = jnp.asarray(kernels["m22basic"])
-    bias_id2 = jnp.asarray(kernels["bias_id2"])
-    bias_ig2 = jnp.asarray(kernels["bias_ig2"])
-    bias_id2g2 = jnp.asarray(kernels["bias_id2g2"])
-    bias_ig2g2 = jnp.asarray(kernels["bias_ig2g2"])
-
-    f13 = jnp.einsum("nk,n->k", x, m13)
-    p13_uv = -61.0 * pbin * kdisc**2 * sigmav / 105.0
-    p13 = (jnp.real(kdisc**3 * f13 * pbin) + p13_uv) * damping
-    p22 = jnp.real(kdisc**3 * _quadratic_form_columns(x, m22)) * damping
-
-    raw_id2d2 = jnp.real(kdisc**3 * (2.0 * _quadratic_form_columns(x2, m22basic)))
-    p_id2d2 = jnp.abs(raw_id2d2 - raw_id2d2[0] + _EPS)
-    p_id2 = jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_id2))
-    p_ig2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_ig2)))
-    p_id2g2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_id2g2)))
-    p_ig2g2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_ig2g2)))
-    p_ifg2 = jnp.abs(jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x2, ifg2) * pbin))
-
-    return {
-        "real_loop_matter": _interpolate_to_output_jax(kdisc, p13 + p22, output_k),
-        "real_loop_b2_b2": _interpolate_to_output_jax(kdisc, -p_id2d2, output_k),
-        "real_cross_b1_b2": _interpolate_to_output_jax(kdisc, p_id2, output_k),
-        "real_cross_b1_bG2": _interpolate_to_output_jax(kdisc, -p_ig2, output_k),
-        "real_loop_b2_bG2": _interpolate_to_output_jax(kdisc, -p_id2g2, output_k),
-        "real_loop_bG2_bG2": _interpolate_to_output_jax(kdisc, p_ig2g2, output_k),
-        "real_gamma3": _interpolate_to_output_jax(kdisc, -p_ifg2, output_k),
-    }
+    pdisc = _loglog_interpolate_jax(kdisc, support_k, pk_linear)
+    return _realspace_terms_dict_from_stack(_compute_fftlog_realspace_terms_jitted(kdisc, pdisc, output_k, h, settings))
 
 
 def compute_fftlog_realspace_terms_from_preprocessed(
@@ -314,68 +355,12 @@ def compute_fftlog_realspace_terms_from_preprocessed(
         Optional output grid in ``1/Mpc``. If omitted, the terms are returned
         on the FFTLog support grid.
     """
-    if settings.kernel_source != "analytic":
-        raise NotImplementedError("FFTLog real-space loops only support kernel_source='analytic'.")
-
-    nmax = settings.fftlog_n
-    kernels = _analytic_realspace_kernel_registry(
-        nmax,
-        settings.fftlog_k0_over_h,
-        settings.fftlog_kmax_over_h,
-        settings.fftlog_bias_matter + settings.fftlog_bias,
-        settings.fftlog_bias_bias + settings.fftlog_bias,
-    )
-
     kdisc = jnp.asarray(np.asarray(fftlog_input.kdisc, dtype=float))
     pdisc = jnp.asarray(np.asarray(fftlog_input.pdisc, dtype=float))
     if output_k is None:
         output_k = kdisc
-
-    etam = jnp.asarray(kernels["etam"])
-    etam2 = jnp.asarray(kernels["etam2"])
-    cmsym = _fftlog_coefficients_jax(kdisc, pdisc, kdisc, etam, settings.fftlog_bias_matter + settings.fftlog_bias)
-    cmsym2 = _fftlog_coefficients_jax(kdisc, pdisc, kdisc, etam2, settings.fftlog_bias_bias + settings.fftlog_bias)
-
-    logk = jnp.log(kdisc)
-    x = cmsym[:, None] * jnp.exp(etam[:, None] * logk[None, :])
-    x2 = cmsym2[:, None] * jnp.exp(etam2[:, None] * logk[None, :])
-
     h = float(fftlog_input.h)
-    sigmav = jnp.trapezoid(kdisc * pdisc, jnp.log(kdisc)) / (6.0 * jnp.pi**2)
-    cutoff = _CUTOFF_OVER_H * h
-    damping = jnp.exp(-jnp.power(kdisc / cutoff, 6.0))
-
-    m13 = jnp.asarray(kernels["m13"])
-    ifg2 = jnp.asarray(kernels["ifg2"])
-    m22 = jnp.asarray(kernels["m22"])
-    m22basic = jnp.asarray(kernels["m22basic"])
-    bias_id2 = jnp.asarray(kernels["bias_id2"])
-    bias_ig2 = jnp.asarray(kernels["bias_ig2"])
-    bias_id2g2 = jnp.asarray(kernels["bias_id2g2"])
-    bias_ig2g2 = jnp.asarray(kernels["bias_ig2g2"])
-
-    f13 = jnp.einsum("nk,n->k", x, m13)
-    p13_uv = -61.0 * pdisc * kdisc**2 * sigmav / 105.0
-    p13 = (jnp.real(kdisc**3 * f13 * pdisc) + p13_uv) * damping
-    p22 = jnp.real(kdisc**3 * _quadratic_form_columns(x, m22)) * damping
-
-    raw_id2d2 = jnp.real(kdisc**3 * (2.0 * _quadratic_form_columns(x2, m22basic)))
-    p_id2d2 = jnp.abs(raw_id2d2 - raw_id2d2[0] + _EPS)
-    p_id2 = jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_id2))
-    p_ig2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_ig2)))
-    p_id2g2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_id2g2)))
-    p_ig2g2 = jnp.abs(jnp.real(kdisc**3 * _quadratic_form_columns(x2, bias_ig2g2)))
-    p_ifg2 = jnp.abs(jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x2, ifg2) * pdisc))
-
-    return {
-        "real_loop_matter": _interpolate_to_output_jax(kdisc, p13 + p22, output_k),
-        "real_loop_b2_b2": _interpolate_to_output_jax(kdisc, -p_id2d2, output_k),
-        "real_cross_b1_b2": _interpolate_to_output_jax(kdisc, p_id2, output_k),
-        "real_cross_b1_bG2": _interpolate_to_output_jax(kdisc, -p_ig2, output_k),
-        "real_loop_b2_bG2": _interpolate_to_output_jax(kdisc, -p_id2g2, output_k),
-        "real_loop_bG2_bG2": _interpolate_to_output_jax(kdisc, p_ig2g2, output_k),
-        "real_gamma3": _interpolate_to_output_jax(kdisc, -p_ifg2, output_k),
-    }
+    return _realspace_terms_dict_from_stack(_compute_fftlog_realspace_terms_jitted(kdisc, pdisc, output_k, h, settings))
 
 
 def compute_fftlog_realspace_terms(

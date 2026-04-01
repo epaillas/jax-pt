@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from functools import partial
 from functools import lru_cache
 
+import jax
 import jax.numpy as jnp
 import numpy as np
 from sympy import lambdify, symbols
@@ -12,13 +14,37 @@ from ..cosmology import FFTLogInput, LinearPowerInput, prepare_fftlog_input
 from .spectral import (
     _analytic_realspace_kernel_registry,
     _fftlog_coefficients_jax,
-    _interpolate_to_output_jax,
+    _interpolate_stack_to_output_jax,
     _j_np,
     _quadratic_form_columns,
 )
 
 _TRANSFER_BIAS = -0.8
 _TRANSFER_BIAS_BIASED = -1.25
+_RSD_TERM_NAMES = (
+    "rsd_l0_loop_00",
+    "rsd_l0_loop_01",
+    "rsd_l0_loop_11",
+    "rsd_l2_loop_00",
+    "rsd_l2_loop_01",
+    "rsd_l2_11",
+    "rsd_l4_loop_00",
+    "rsd_l4_loop_01",
+    "rsd_l4_loop_11",
+    "rsd_l0_b1_b2",
+    "rsd_l0_b2",
+    "rsd_l0_b1_bG2",
+    "rsd_l0_bG2",
+    "rsd_l2_b1_b2",
+    "rsd_l2_b2",
+    "rsd_l2_b1_bG2",
+    "rsd_l2_bG2",
+    "rsd_l4_b2",
+    "rsd_l4_bG2",
+    "rsd_l0_gamma3_b1",
+    "rsd_l0_gamma3_bias",
+    "rsd_l2_gamma3",
+)
 
 _MATTER_MULTIPLIER_TEXT = {
     "vv0_f2": r"""-1/140*(Csc[n1*Pi]*Csc[n2*Pi]*Csc[(n1 + n2)*Pi]*((-120 + 145*n2 + 448*n1^4*(-1 + n2)*n2 + 948*n2^2 - 1892*n2^3 + 1152*n2^4 - 224*n2^5 + 12*n1^3*(7 + 146*n2 - 272*n2^2 + 112*n2^3) + 4*n1^2*(-69 - 540*n2 + 1652*n2^2 - 1352*n2^3 + 336*n2^4) + n1*(321 + 792*n2 - 4840*n2^2 + 6008*n2^3 - 2816*n2^4 + 448*n2^5))*Sin[2*n1*Pi] + (224*n1^5*(-1 + 2*n2) + 64*n1^4*(18 - 44*n2 + 21*n2^2) + 3*(-40 + 107*n2 - 92*n2^2 + 28*n2^3) + 4*n1^3*(-473 + 1502*n2 - 1352*n2^2 + 336*n2^3) + n1*(145 + 792*n2 - 2160*n2^2 + 1752*n2^3 - 448*n2^4) + 4*n1^2*(237 - 1210*n2 + 1652*n2^2 - 816*n2^3 + 112*n2^4))*Sin[2*n2*Pi] + (120 - 321*n2 + 448*n1^4*(-1 + n2)*n2 + 276*n2^2 - 84*n2^3 + 4*n1^3*(-21 + 466*n2 - 648*n2^2 + 224*n2^3) + n1*(-321 + 1856*n2 - 2864*n2^2 + 1864*n2^3 - 448*n2^4) + 4*n1^2*(69 - 716*n2 + 1156*n2^2 - 648*n2^3 + 112*n2^4))*Sin[2*(n1 + n2)*Pi]))/(n1*(-1 + 4*n1^2)*n2*(-5 + 2*n1 + 2*n2)*(-1 + 4*n2^2))""",
@@ -121,6 +147,206 @@ def _build_bias_matrices(m22basic: np.ndarray, etam2: np.ndarray, growth_rate: f
     }
 
 
+def _rsd_terms_dict_from_stack(values: jnp.ndarray) -> dict[str, jnp.ndarray]:
+    return {name: values[index] for index, name in enumerate(_RSD_TERM_NAMES)}
+
+
+@jax.jit
+def _evaluate_matrix_stack_batch(
+    x: jnp.ndarray,
+    matrices: jnp.ndarray,
+    kdisc: jnp.ndarray,
+    damping: jnp.ndarray,
+) -> jnp.ndarray:
+    return jax.vmap(lambda matrix: _evaluate_matrix_stack(x, matrix, kdisc, damping))(matrices)
+
+
+@jax.jit
+def _mu_to_multipoles_batch(mu_terms: jnp.ndarray) -> jnp.ndarray:
+    return jax.vmap(lambda row: jnp.stack(_mu_to_multipoles(*row)))(mu_terms)
+
+
+@jax.jit
+def _evaluate_bias_terms(
+    x2: jnp.ndarray,
+    x_transfer: jnp.ndarray,
+    x2_transfer: jnp.ndarray,
+    bias_matrices: jnp.ndarray,
+    tbin: jnp.ndarray,
+    transfer_b2: jnp.ndarray,
+    transfer_bg2: jnp.ndarray,
+    kdisc: jnp.ndarray,
+    damping: jnp.ndarray,
+) -> jnp.ndarray:
+    ones = jnp.ones_like(damping)
+    direct = _evaluate_matrix_stack_batch(x2, bias_matrices, kdisc, ones)
+    transfer_b2_terms = tbin * _evaluate_matrix_stack_batch(x2_transfer, transfer_b2[None, :, :], kdisc, damping)[0]
+    transfer_bg2_terms = tbin * _evaluate_matrix_stack_batch(x_transfer, transfer_bg2[None, :, :], kdisc, damping)[0]
+    return jnp.stack(
+        (
+            direct[0],
+            direct[1] + transfer_b2_terms,
+            -direct[2],
+            -(direct[3] + transfer_bg2_terms),
+            direct[4],
+            direct[5] + 2.0 * transfer_b2_terms,
+            -direct[6],
+            -(direct[7] + 2.0 * transfer_bg2_terms),
+            direct[8],
+            -direct[9],
+        )
+    )
+
+
+@partial(jax.jit, static_argnames=("settings",))
+def _compute_fftlog_rsd_terms_jitted(
+    kdisc: jnp.ndarray,
+    pk_linear: jnp.ndarray,
+    transfer_linear: jnp.ndarray,
+    output_k: jnp.ndarray,
+    h: float,
+    f: float,
+    kernels: dict[str, np.ndarray],
+    transfer: dict[str, np.ndarray],
+    settings: PTSettings,
+) -> jnp.ndarray:
+    etam = jnp.asarray(kernels["etam"])
+    etam2 = jnp.asarray(kernels["etam2"])
+    etam_transfer = jnp.asarray(transfer["etam_transfer"])
+    etam2_transfer = jnp.asarray(transfer["etam2_transfer"])
+
+    cmsym = _fftlog_coefficients_jax(kdisc, pk_linear, kdisc, etam, settings.fftlog_bias_matter + settings.fftlog_bias)
+    cmsym2 = _fftlog_coefficients_jax(kdisc, pk_linear, kdisc, etam2, settings.fftlog_bias_bias + settings.fftlog_bias)
+    cmsym_transfer = _fftlog_coefficients_jax(kdisc, transfer_linear, kdisc, etam_transfer, _TRANSFER_BIAS)
+    cmsym2_transfer = _fftlog_coefficients_jax(kdisc, transfer_linear, kdisc, etam2_transfer, _TRANSFER_BIAS_BIASED)
+
+    logk = jnp.log(kdisc)
+    x = cmsym[:, None] * jnp.exp(etam[:, None] * logk[None, :])
+    x2 = cmsym2[:, None] * jnp.exp(etam2[:, None] * logk[None, :])
+    x_transfer = cmsym_transfer[:, None] * jnp.exp(etam_transfer[:, None] * logk[None, :])
+    x2_transfer = cmsym2_transfer[:, None] * jnp.exp(etam2_transfer[:, None] * logk[None, :])
+
+    pbin = pk_linear
+    tbin = transfer_linear
+    sigmav = jnp.trapezoid(kdisc * pk_linear, jnp.log(kdisc)) / (6.0 * jnp.pi**2)
+    damping = jnp.exp(-jnp.power(kdisc / (3.0 * h), 6.0))
+
+    nu = -0.5 * etam
+    m13 = jnp.asarray(kernels["m13"])
+    m13_mu2_dd = m13 * 2.0 / (1.0 + 9.0 * nu) * 9.0 * f * (1.0 + nu)
+    m13_mu2_vd = m13 * 2.0 / (1.0 + 9.0 * nu) * (-f * (7.0 + 9.0 * f - 9.0 * nu))
+    m13_mu4_vv = m13 / (1.0 + 9.0 * nu) * (-3.0 * f * f * (5.0 + 6.0 * f - 3.0 * nu))
+    m13_mu4_vd = m13 * 2.0 / (1.0 + 9.0 * nu) * 9.0 * f * f * (1.0 + 2.0 * nu)
+    m13_mu6 = m13 * 2.0 / (1.0 + 9.0 * nu) * 9.0 * f**3 * nu
+
+    p13_mu_terms = jnp.stack(
+        (
+            (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13) * pbin) - 61.0 * pbin * kdisc**2 * sigmav / 105.0) * damping,
+            (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu2_vd) * pbin) - pbin * kdisc**2 * sigmav * f * (250.0 + 144.0 * f) / 105.0) * damping,
+            (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu2_dd) * pbin) - pbin * kdisc**2 * sigmav * f * (105.0 * f - 6.0) / 105.0) * damping,
+            (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu4_vv) * pbin) - pbin * kdisc**2 * sigmav * f * f * (63.0 + 48.0 * f) / 35.0) * damping,
+            (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu4_vd) * pbin) - pbin * kdisc**2 * sigmav * f * f * (44.0 + 70.0 * f) / 35.0) * damping,
+            (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu6) * pbin) - pbin * kdisc**2 * sigmav * f**3 * (46.0 + 35.0 * f) / 35.0) * damping,
+        )
+    )
+
+    m22_mu = _build_m22_mu_matrices(jnp.asarray(kernels["m22"]), jnp.asarray(kernels["etam"]), f)
+    m22_mu_stack = jnp.stack(
+        (
+            jnp.asarray(kernels["m22"]),
+            jnp.asarray(m22_mu["mu2_vd"]),
+            jnp.asarray(m22_mu["mu2_dd"]),
+            jnp.asarray(m22_mu["mu4_vv"]),
+            jnp.asarray(m22_mu["mu4_vd"]),
+            jnp.asarray(m22_mu["mu4_dd"]),
+            jnp.asarray(m22_mu["mu6_vv"]),
+            jnp.asarray(m22_mu["mu6_vd"]),
+            jnp.asarray(m22_mu["mu8"]),
+        )
+    )
+    p22_terms = _evaluate_matrix_stack_batch(x, m22_mu_stack, kdisc, damping)
+
+    p12_matrices = jnp.stack(
+        (
+            jnp.asarray(f * f * transfer["vv0_f2"] + f**3 * transfer["vv0_f3"]),
+            jnp.asarray(f * transfer["vd0_f1"] + f * f * transfer["vd0_f2"]),
+            jnp.asarray(transfer["dd0_f0"] + f * transfer["dd0_f1"]),
+            jnp.asarray((20.0 / 7.0) * f * f * transfer["vv0_f2"] + f**3 * transfer["vv2_f3"]),
+            jnp.asarray(2.0 * f * transfer["vd0_f1"] + f * f * transfer["vd2_f2"]),
+            jnp.asarray(2.0 * f * transfer["dd0_f1"]),
+            jnp.asarray((8.0 / 7.0) * f * f * transfer["vv0_f2"] + f**3 * transfer["vv4_f3"]),
+            jnp.asarray(f * f * transfer["vd4_f2"]),
+        )
+    )
+    p12_terms = tbin * _evaluate_matrix_stack_batch(x_transfer, p12_matrices, kdisc, damping)
+
+    mu_inputs = jnp.stack(
+        (
+            jnp.stack((jnp.zeros_like(kdisc), jnp.zeros_like(kdisc), p13_mu_terms[3] + p22_terms[3], p13_mu_terms[5] + p22_terms[6], p22_terms[8])),
+            jnp.stack((jnp.zeros_like(kdisc), p13_mu_terms[1] + p22_terms[1], p13_mu_terms[4] + p22_terms[4], p22_terms[7], jnp.zeros_like(kdisc))),
+            jnp.stack((p13_mu_terms[0] + p22_terms[0], p13_mu_terms[2] + p22_terms[2], p22_terms[5], jnp.zeros_like(kdisc), jnp.zeros_like(kdisc))),
+        )
+    )
+    multipoles = _mu_to_multipoles_batch(mu_inputs)
+
+    bias_m22 = _build_bias_matrices(jnp.asarray(kernels["m22basic"]), jnp.asarray(kernels["etam2"]), f)
+    bias_matrices = jnp.stack(
+        (
+            jnp.asarray(bias_m22["l0_b1b2"]),
+            jnp.asarray(bias_m22["l0_b2"]),
+            jnp.asarray(bias_m22["l0_b1bG2"]),
+            jnp.asarray(bias_m22["l0_bG2"]),
+            jnp.asarray(bias_m22["l2_b1b2"]),
+            jnp.asarray(bias_m22["l2_b2"]),
+            jnp.asarray(bias_m22["l2_b1bG2"]),
+            jnp.asarray(bias_m22["l2_bG2"]),
+            jnp.asarray(bias_m22["l4_b2"]),
+            jnp.asarray(bias_m22["l4_bG2"]),
+        )
+    )
+    bias_terms = _evaluate_bias_terms(
+        x2,
+        x_transfer,
+        x2_transfer,
+        bias_matrices,
+        tbin,
+        jnp.asarray(f * transfer["b2_vv0_f1"]),
+        jnp.asarray(f * transfer["bG2_vv0_f1"]),
+        kdisc,
+        damping,
+    )
+
+    p_ifg2 = jnp.abs(jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x2, jnp.asarray(kernels["ifg2"])) * pbin))
+
+    stacked_terms = jnp.stack(
+        (
+            multipoles[0, 0] + p12_terms[0],
+            multipoles[1, 0] + p12_terms[1],
+            multipoles[2, 0] + p12_terms[2],
+            multipoles[0, 1] + p12_terms[3],
+            multipoles[1, 1] + p12_terms[4],
+            multipoles[2, 1] + p12_terms[5],
+            multipoles[0, 2] + p12_terms[6],
+            multipoles[1, 2] + p12_terms[7],
+            multipoles[2, 2],
+            bias_terms[0],
+            bias_terms[1],
+            bias_terms[2],
+            bias_terms[3],
+            bias_terms[4],
+            bias_terms[5],
+            bias_terms[6],
+            bias_terms[7],
+            bias_terms[8],
+            bias_terms[9],
+            -p_ifg2,
+            -(f / 3.0) * p_ifg2,
+            -(2.0 * f / 3.0) * p_ifg2,
+        )
+    )
+    return _interpolate_stack_to_output_jax(kdisc, stacked_terms, output_k)
+
+
 def compute_fftlog_rsd_terms(
     linear_input: LinearPowerInput,
     settings: PTSettings,
@@ -166,96 +392,6 @@ def compute_fftlog_rsd_terms(
     transfer_linear = jnp.asarray(np.asarray(fftlog_input.tdisc, dtype=float))
     h = float(fftlog_input.h)
     f = float(fftlog_input.growth_rate)
-    logk = jnp.log(kdisc)
-
-    etam = jnp.asarray(kernels["etam"])
-    etam2 = jnp.asarray(kernels["etam2"])
-    etam_transfer = jnp.asarray(transfer["etam_transfer"])
-    etam2_transfer = jnp.asarray(transfer["etam2_transfer"])
-
-    cmsym = _fftlog_coefficients_jax(kdisc, pk_linear, kdisc, etam, settings.fftlog_bias_matter + settings.fftlog_bias)
-    cmsym2 = _fftlog_coefficients_jax(kdisc, pk_linear, kdisc, etam2, settings.fftlog_bias_bias + settings.fftlog_bias)
-    cmsym_transfer = _fftlog_coefficients_jax(kdisc, transfer_linear, kdisc, etam_transfer, _TRANSFER_BIAS)
-    cmsym2_transfer = _fftlog_coefficients_jax(kdisc, transfer_linear, kdisc, etam2_transfer, _TRANSFER_BIAS_BIASED)
-
-    x = cmsym[:, None] * jnp.exp(etam[:, None] * logk[None, :])
-    x2 = cmsym2[:, None] * jnp.exp(etam2[:, None] * logk[None, :])
-    x_transfer = cmsym_transfer[:, None] * jnp.exp(etam_transfer[:, None] * logk[None, :])
-    x2_transfer = cmsym2_transfer[:, None] * jnp.exp(etam2_transfer[:, None] * logk[None, :])
-
-    pbin = pk_linear
-    tbin = transfer_linear
-    sigmav = jnp.trapezoid(kdisc * pk_linear, jnp.log(kdisc)) / (6.0 * jnp.pi**2)
-    damping = jnp.exp(-jnp.power(kdisc / (3.0 * h), 6.0))
-
-    nu = -0.5 * etam
-    m13 = jnp.asarray(kernels["m13"])
-    m13_mu2_dd = m13 * 2.0 / (1.0 + 9.0 * nu) * 9.0 * f * (1.0 + nu)
-    m13_mu2_vd = m13 * 2.0 / (1.0 + 9.0 * nu) * (-f * (7.0 + 9.0 * f - 9.0 * nu))
-    m13_mu4_vv = m13 / (1.0 + 9.0 * nu) * (-3.0 * f * f * (5.0 + 6.0 * f - 3.0 * nu))
-    m13_mu4_vd = m13 * 2.0 / (1.0 + 9.0 * nu) * 9.0 * f * f * (1.0 + 2.0 * nu)
-    m13_mu6 = m13 * 2.0 / (1.0 + 9.0 * nu) * 9.0 * f**3 * nu
-
-    p13_mu0_dd = (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13) * pbin) - 61.0 * pbin * kdisc**2 * sigmav / 105.0) * damping
-    p13_mu2_dd = (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu2_dd) * pbin) - pbin * kdisc**2 * sigmav * f * (105.0 * f - 6.0) / 105.0) * damping
-    p13_mu2_vd = (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu2_vd) * pbin) - pbin * kdisc**2 * sigmav * f * (250.0 + 144.0 * f) / 105.0) * damping
-    p13_mu4_vv = (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu4_vv) * pbin) - pbin * kdisc**2 * sigmav * f * f * (63.0 + 48.0 * f) / 35.0) * damping
-    p13_mu4_vd = (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu4_vd) * pbin) - pbin * kdisc**2 * sigmav * f * f * (44.0 + 70.0 * f) / 35.0) * damping
-    p13_mu6 = (jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x, m13_mu6) * pbin) - pbin * kdisc**2 * sigmav * f**3 * (46.0 + 35.0 * f) / 35.0) * damping
-
-    m22_mu = _build_m22_mu_matrices(np.asarray(kernels["m22"]), np.asarray(kernels["etam"]), f)
-    p22_mu0_dd = _evaluate_matrix_stack(x, np.asarray(kernels["m22"]), kdisc, damping)
-    p22_mu2_vd = _evaluate_matrix_stack(x, m22_mu["mu2_vd"], kdisc, damping)
-    p22_mu2_dd = _evaluate_matrix_stack(x, m22_mu["mu2_dd"], kdisc, damping)
-    p22_mu4_vv = _evaluate_matrix_stack(x, m22_mu["mu4_vv"], kdisc, damping)
-    p22_mu4_vd = _evaluate_matrix_stack(x, m22_mu["mu4_vd"], kdisc, damping)
-    p22_mu4_dd = _evaluate_matrix_stack(x, m22_mu["mu4_dd"], kdisc, damping)
-    p22_mu6_vv = _evaluate_matrix_stack(x, m22_mu["mu6_vv"], kdisc, damping)
-    p22_mu6_vd = _evaluate_matrix_stack(x, m22_mu["mu6_vd"], kdisc, damping)
-    p22_mu8 = _evaluate_matrix_stack(x, m22_mu["mu8"], kdisc, damping)
-
-    p12_l0_vv = tbin * _evaluate_matrix_stack(x_transfer, f * f * transfer["vv0_f2"] + f**3 * transfer["vv0_f3"], kdisc, damping)
-    p12_l0_vd = tbin * _evaluate_matrix_stack(x_transfer, f * transfer["vd0_f1"] + f * f * transfer["vd0_f2"], kdisc, damping)
-    p12_l0_dd = tbin * _evaluate_matrix_stack(x_transfer, transfer["dd0_f0"] + f * transfer["dd0_f1"], kdisc, damping)
-    p12_l2_vv = tbin * _evaluate_matrix_stack(x_transfer, (20.0 / 7.0) * f * f * transfer["vv0_f2"] + f**3 * transfer["vv2_f3"], kdisc, damping)
-    p12_l2_vd = tbin * _evaluate_matrix_stack(x_transfer, 2.0 * f * transfer["vd0_f1"] + f * f * transfer["vd2_f2"], kdisc, damping)
-    p12_l2_dd = tbin * _evaluate_matrix_stack(x_transfer, 2.0 * f * transfer["dd0_f1"], kdisc, damping)
-    p12_l4_vv = tbin * _evaluate_matrix_stack(x_transfer, (8.0 / 7.0) * f * f * transfer["vv0_f2"] + f**3 * transfer["vv4_f3"], kdisc, damping)
-    p12_l4_vd = tbin * _evaluate_matrix_stack(x_transfer, f * f * transfer["vd4_f2"], kdisc, damping)
-
-    l0_vv_mu, l2_vv_mu, l4_vv_mu = _mu_to_multipoles(jnp.zeros_like(kdisc), jnp.zeros_like(kdisc), p13_mu4_vv + p22_mu4_vv, p13_mu6 + p22_mu6_vv, p22_mu8)
-    l0_vd_mu, l2_vd_mu, l4_vd_mu = _mu_to_multipoles(jnp.zeros_like(kdisc), p13_mu2_vd + p22_mu2_vd, p13_mu4_vd + p22_mu4_vd, p22_mu6_vd, jnp.zeros_like(kdisc))
-    l0_dd_mu, l2_dd_mu, l4_dd_mu = _mu_to_multipoles(p13_mu0_dd + p22_mu0_dd, p13_mu2_dd + p22_mu2_dd, p22_mu4_dd, jnp.zeros_like(kdisc), jnp.zeros_like(kdisc))
-
-    bias_m22 = _build_bias_matrices(np.asarray(kernels["m22basic"]), np.asarray(kernels["etam2"]), f)
-    bias_terms = {
-        "rsd_l0_b1_b2": _evaluate_matrix_stack(x2, bias_m22["l0_b1b2"], kdisc, jnp.ones_like(damping)),
-        "rsd_l0_b2": _evaluate_matrix_stack(x2, bias_m22["l0_b2"], kdisc, jnp.ones_like(damping)) + tbin * _evaluate_matrix_stack(x2_transfer, f * transfer["b2_vv0_f1"], kdisc, damping),
-        "rsd_l0_b1_bG2": -_evaluate_matrix_stack(x2, bias_m22["l0_b1bG2"], kdisc, jnp.ones_like(damping)),
-        "rsd_l0_bG2": -(_evaluate_matrix_stack(x2, bias_m22["l0_bG2"], kdisc, jnp.ones_like(damping)) + tbin * _evaluate_matrix_stack(x_transfer, f * transfer["bG2_vv0_f1"], kdisc, damping)),
-        "rsd_l2_b1_b2": _evaluate_matrix_stack(x2, bias_m22["l2_b1b2"], kdisc, jnp.ones_like(damping)),
-        "rsd_l2_b2": _evaluate_matrix_stack(x2, bias_m22["l2_b2"], kdisc, jnp.ones_like(damping)) + tbin * _evaluate_matrix_stack(x2_transfer, 2.0 * f * transfer["b2_vv0_f1"], kdisc, damping),
-        "rsd_l2_b1_bG2": -_evaluate_matrix_stack(x2, bias_m22["l2_b1bG2"], kdisc, jnp.ones_like(damping)),
-        "rsd_l2_bG2": -(_evaluate_matrix_stack(x2, bias_m22["l2_bG2"], kdisc, jnp.ones_like(damping)) + tbin * _evaluate_matrix_stack(x_transfer, 2.0 * f * transfer["bG2_vv0_f1"], kdisc, damping)),
-        "rsd_l4_b2": _evaluate_matrix_stack(x2, bias_m22["l4_b2"], kdisc, jnp.ones_like(damping)),
-        "rsd_l4_bG2": -_evaluate_matrix_stack(x2, bias_m22["l4_bG2"], kdisc, jnp.ones_like(damping)),
-    }
-
-    p_ifg2 = jnp.abs(jnp.real(kdisc**3 * jnp.einsum("nk,n->k", x2, jnp.asarray(kernels["ifg2"])) * pbin))
-
-    terms = {
-        "rsd_l0_loop_00": _interpolate_to_output_jax(kdisc, l0_vv_mu + p12_l0_vv, output_k),
-        "rsd_l0_loop_01": _interpolate_to_output_jax(kdisc, l0_vd_mu + p12_l0_vd, output_k),
-        "rsd_l0_loop_11": _interpolate_to_output_jax(kdisc, l0_dd_mu + p12_l0_dd, output_k),
-        "rsd_l2_loop_00": _interpolate_to_output_jax(kdisc, l2_vv_mu + p12_l2_vv, output_k),
-        "rsd_l2_loop_01": _interpolate_to_output_jax(kdisc, l2_vd_mu + p12_l2_vd, output_k),
-        "rsd_l2_11": _interpolate_to_output_jax(kdisc, l2_dd_mu + p12_l2_dd, output_k),
-        "rsd_l4_loop_00": _interpolate_to_output_jax(kdisc, l4_vv_mu + p12_l4_vv, output_k),
-        "rsd_l4_loop_01": _interpolate_to_output_jax(kdisc, l4_vd_mu + p12_l4_vd, output_k),
-        "rsd_l4_loop_11": _interpolate_to_output_jax(kdisc, l4_dd_mu, output_k),
-        "rsd_l0_gamma3_b1": _interpolate_to_output_jax(kdisc, -p_ifg2, output_k),
-        "rsd_l0_gamma3_bias": _interpolate_to_output_jax(kdisc, -(f / 3.0) * p_ifg2, output_k),
-        "rsd_l2_gamma3": _interpolate_to_output_jax(kdisc, -(2.0 * f / 3.0) * p_ifg2, output_k),
-    }
-    terms.update({name: _interpolate_to_output_jax(kdisc, values, output_k) for name, values in bias_terms.items()})
-    return terms
+    return _rsd_terms_dict_from_stack(
+        _compute_fftlog_rsd_terms_jitted(kdisc, pk_linear, transfer_linear, output_k, h, f, kernels, transfer, settings)
+    )
