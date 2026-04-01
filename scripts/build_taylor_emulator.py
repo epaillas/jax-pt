@@ -15,12 +15,15 @@ from jaxpt import PTSettings, build_multipole_emulator, repo_cache_dir
 from jaxpt.theories import (
     GalaxyPowerSpectrumMultipolesTheory,
     PowerSpectrumTemplate,
+    QuantileGalaxyPowerSpectrumMultipolesTheory,
+    load_density_split_galaxy_power_spectrum_multipoles_parameters,
     load_galaxy_power_spectrum_multipoles_parameters,
     load_power_spectrum_template_parameters,
 )
 
 
 DEFAULT_FREE_COSMOLOGY = ("logA", "omega_cdm")
+SUPPORTED_OBSERVABLES = ("galaxy", "density_split")
 
 
 def _parse_assignment(text: str) -> tuple[str, float]:
@@ -36,6 +39,12 @@ def _parse_assignment(text: str) -> tuple[str, float]:
 def build_parser() -> argparse.ArgumentParser:
     """Build the CLI parser for the multipole Taylor-emulator training script."""
     parser = argparse.ArgumentParser(description="Build a hashed Taylor emulator for jaxpt power-spectrum multipoles.")
+    parser.add_argument(
+        "--observable",
+        choices=SUPPORTED_OBSERVABLES,
+        default="galaxy",
+        help="Theory observable to emulate.",
+    )
     parser.add_argument("--z", type=float, default=0.5, help="Redshift at which to build the emulator.")
     parser.add_argument("--kmin", type=float, default=0.01, help="Minimum evaluation k in 1/Mpc.")
     parser.add_argument("--kmax", type=float, default=0.2, help="Maximum evaluation k in 1/Mpc.")
@@ -78,7 +87,7 @@ def _render_progress(completed: int, total: int) -> None:
     print(f"[{bar}] {completed:4d}/{total:4d} {100.0 * fraction:6.2f}%", end=end, flush=True)
 
 
-def _set_fixed_status(theory: GalaxyPowerSpectrumMultipolesTheory, free_cosmology: set[str], extra_fixed: set[str]) -> None:
+def _set_fixed_status(theory, free_cosmology: set[str], extra_fixed: set[str]) -> None:
     cosmology_names = set(theory.template.params.names())
     valid_names = set(theory.params.names())
     invalid = sorted((free_cosmology | extra_fixed) - valid_names)
@@ -97,10 +106,22 @@ def _resolve_step_sizes(default_scale: float, explicit: list[tuple[str, float]])
     return {name: value for name, value in explicit}
 
 
-def _format_param_values(theory: GalaxyPowerSpectrumMultipolesTheory, names: list[str]) -> str:
+def _format_param_values(theory, names: list[str]) -> str:
     if not names:
         return "(none)"
     return ", ".join(f"{name}={theory.params[name].value:g}" for name in names)
+
+
+def _build_theory(args, cosmology_defaults: dict[str, float], nuisance_defaults: dict[str, float], eval_k: np.ndarray):
+    settings = PTSettings(backend="jaxpt", ir_resummation=False)
+    template = PowerSpectrumTemplate(cosmology_defaults, z=args.z, settings=settings, provider="cosmoprimo")
+    if args.observable == "density_split":
+        theory = QuantileGalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
+    else:
+        theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
+    for name, value in nuisance_defaults.items():
+        theory.params[name].update(value=value)
+    return theory, settings
 
 
 def main() -> None:
@@ -114,16 +135,14 @@ def main() -> None:
     args = build_parser().parse_args()
 
     cosmology_defaults = load_power_spectrum_template_parameters().defaults_dict()
-    nuisance_defaults = load_galaxy_power_spectrum_multipoles_parameters().defaults_dict()
+    if args.observable == "density_split":
+        nuisance_defaults = load_density_split_galaxy_power_spectrum_multipoles_parameters().defaults_dict()
+    else:
+        nuisance_defaults = load_galaxy_power_spectrum_multipoles_parameters().defaults_dict()
     cosmology_defaults.update(dict(args.cosmo))
 
-    settings = PTSettings(backend="jaxpt", ir_resummation=False)
     eval_k = np.linspace(args.kmin, args.kmax, args.nk)
-
-    template = PowerSpectrumTemplate(cosmology_defaults, z=args.z, settings=settings, provider="cosmoprimo")
-    theory = GalaxyPowerSpectrumMultipolesTheory(template=template, k=eval_k)
-    for name, value in nuisance_defaults.items():
-        theory.params[name].update(value=value)
+    theory, settings = _build_theory(args, cosmology_defaults, nuisance_defaults, eval_k)
 
     _set_fixed_status(
         theory,
@@ -139,6 +158,8 @@ def main() -> None:
     held_params = [name for name in theory.params.names() if name not in emulated_params]
 
     print("Taylor emulator build")
+    print(f"  observable: {args.observable}")
+    print(f"  theory: {theory.__class__.__name__}")
     print(f"  backend: {settings.backend}")
     print(f"  provider: cosmoprimo")
     print(f"  redshift: {args.z:g}")
@@ -163,7 +184,7 @@ def main() -> None:
         param_names=explicit_params if explicit_params else None,
         cache_dir=output_dir,
         finite_difference_accuracy=args.finite_difference_accuracy,
-        metadata={"script": "build_multipole_emulator"},
+        metadata={"script": "build_multipole_emulator", "observable": args.observable},
         progress_callback=_render_progress,
         force=args.force,
     )

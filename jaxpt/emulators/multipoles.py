@@ -7,12 +7,25 @@ from typing import Any
 
 import numpy as np
 
-from ..theories import GalaxyPowerSpectrumMultipolesTheory
+from ..theories import GalaxyPowerSpectrumMultipolesTheory, QuantileGalaxyPowerSpectrumMultipolesTheory
 from .taylor import TaylorEmulator
 
 
+MultipoleEmulatorTheory = GalaxyPowerSpectrumMultipolesTheory | QuantileGalaxyPowerSpectrumMultipolesTheory
+
+
+def _cache_settings_payload(settings: Any) -> dict[str, Any]:
+    return {
+        "loop_order": settings.loop_order,
+        "ir_resummation": settings.ir_resummation,
+        "cb": settings.cb,
+        "rsd": settings.rsd,
+        "ap_effect": settings.ap_effect,
+    }
+
+
 def build_multipole_emulator(
-    theory: GalaxyPowerSpectrumMultipolesTheory,
+    theory: MultipoleEmulatorTheory,
     *,
     order: int = 4,
     step_sizes: float | Mapping[str, float] = 0.01,
@@ -24,13 +37,13 @@ def build_multipole_emulator(
     progress_callback=None,
     force: bool = False,
 ) -> TaylorEmulator:
-    """Build a Taylor emulator for galaxy power-spectrum multipoles.
+    """Build a Taylor emulator for multipole-like theory outputs.
 
     Parameters
     ----------
     theory
-        `GalaxyPowerSpectrumMultipolesTheory` instance to emulate. The template
-        backend must be ``"jaxpt"``.
+        Supported theory instance to emulate. The template backend must be
+        ``"jaxpt"``.
     order
         Maximum total Taylor order.
     step_sizes
@@ -55,7 +68,7 @@ def build_multipole_emulator(
         If ``True``, rebuild even if a matching hashed file already exists.
     """
     if theory.template.settings.backend != "jaxpt":
-        raise ValueError("build_multipole_emulator requires a jaxpt GalaxyPowerSpectrumMultipolesTheory.")
+        raise ValueError("build_multipole_emulator requires a jaxpt multipole theory.")
 
     if theory.template.is_queryable:
         params = theory.params
@@ -96,6 +109,14 @@ def build_multipole_emulator(
     if metadata is not None:
         build_metadata.update(dict(metadata))
 
+    cache_identity = {
+        "emulator_kind": "multipole_taylor",
+        "z": float(theory.z),
+        "k": np.asarray(theory.k, dtype=float).tolist(),
+        "settings": _cache_settings_payload(theory.template.settings),
+        "parameter_status": status,
+    }
+
     emulator = TaylorEmulator(
         theory_fn=theory,
         fiducial=fiducial,
@@ -105,13 +126,14 @@ def build_multipole_emulator(
         cache_dir=cache_dir,
         cache_key=cache_key,
         finite_difference_accuracy=finite_difference_accuracy,
+        cache_identity=cache_identity,
         metadata=build_metadata,
         valid_param_names=valid_param_names,
     )
     emulator = emulator.build(force=force, progress_callback=progress_callback)
 
     marginalized_names = list(params.marginalized_names())
-    if marginalized_names:
+    if marginalized_names and hasattr(theory, "marginalized_design_matrix"):
         template_emulator = TaylorEmulator(
             theory_fn=lambda query: np.asarray(theory.marginalized_design_matrix(query, parameter_names=marginalized_names), dtype=float),
             fiducial=fiducial,
