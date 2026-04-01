@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from jaxpt import LinearPowerInput, PTSettings, TaylorEmulator, build_multipole_emulator
 from jaxpt.theories import PowerSpectrumTemplate, QuantileGalaxyPowerSpectrumMultipolesTheory
@@ -34,13 +35,45 @@ def test_build_multipole_emulator_supports_density_split_theory(tmp_path) -> Non
         order=1,
         step_sizes=0.05,
         cache_dir=tmp_path,
-        param_names=["bq1", "beta1"],
+        param_names=["b1"],
     )
 
-    prediction = emulator.predict({"bq1": theory.params["bq1"].value, "beta1": theory.params["beta1"].value})
+    prediction = emulator.predict({"b1": theory.params["b1"].value})
     assert isinstance(prediction, np.ndarray)
     assert prediction.shape == (5, 3, 8)
     assert emulator.cache_path is not None
+
+
+def test_build_multipole_emulator_excludes_density_split_marginalized_params_by_default(tmp_path) -> None:
+    theory = QuantileGalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(_linear_input(), settings=PTSettings(ir_resummation=False)),
+        k=np.linspace(0.02, 0.18, 8),
+    )
+
+    emulator = build_multipole_emulator(
+        theory,
+        order=1,
+        step_sizes=0.05,
+        cache_dir=tmp_path,
+    )
+
+    assert emulator.param_names == ["b1"]
+    assert emulator.marginalized_design_matrix({"b1": theory.params["b1"].value}).shape == (5 * 3 * 8, 10)
+
+
+def test_build_multipole_emulator_rejects_density_split_marginalized_parameter_request() -> None:
+    theory = QuantileGalaxyPowerSpectrumMultipolesTheory(
+        template=PowerSpectrumTemplate.from_linear_input(_linear_input(), settings=PTSettings(ir_resummation=False)),
+        k=np.linspace(0.02, 0.18, 8),
+    )
+
+    with pytest.raises(ValueError, match="non-fixed and non-marginalized"):
+        build_multipole_emulator(
+            theory,
+            order=1,
+            step_sizes=0.05,
+            param_names=["b1", "bq1"],
+        )
 
 
 def test_build_taylor_emulator_script_supports_density_split(tmp_path) -> None:
@@ -56,9 +89,7 @@ def test_build_taylor_emulator_script_supports_density_split(tmp_path) -> None:
             "--nk",
             "4",
             "--param",
-            "bq1",
-            "--param",
-            "beta1",
+            "b1",
             "--output-dir",
             str(tmp_path),
         ],
@@ -73,5 +104,5 @@ def test_build_taylor_emulator_script_supports_density_split(tmp_path) -> None:
     assert "QuantileGalaxyPowerSpectrumMultipolesTheory" in result.stdout
 
     loaded = TaylorEmulator.load(outputs[0])
-    prediction = loaded.predict({"bq1": -1.6, "beta1": -0.8})
+    prediction = loaded.predict({"b1": 2.0})
     assert prediction.shape == (5, 3, 4)

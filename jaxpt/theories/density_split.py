@@ -88,6 +88,37 @@ def _tree_multipoles(
     return p0, p2, p4, components
 
 
+def _linear_templates(
+    *,
+    pk_linear: np.ndarray,
+    smoothing: np.ndarray,
+    growth_rate: float,
+    b1: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Return the linear template vectors multiplying ``bq`` and ``beta``."""
+    common = np.asarray(pk_linear, dtype=float) * np.asarray(smoothing, dtype=float)
+    f = float(growth_rate)
+    b1 = float(b1)
+
+    bq_template = np.stack(
+        [
+            common * (b1 + f / 3.0),
+            common * (2.0 * f / 3.0),
+            np.zeros_like(common),
+        ],
+        axis=0,
+    )
+    beta_template = np.stack(
+        [
+            common * (f * b1 / 3.0 + f**2 / 5.0),
+            common * (2.0 * f * b1 / 3.0 + 4.0 * f**2 / 7.0),
+            common * (8.0 * f**2 / 35.0),
+        ],
+        axis=0,
+    )
+    return bq_template, beta_template
+
+
 @dataclass(slots=True)
 class QuantileGalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
     """Tree-level density-split quantile-galaxy cross-power multipoles from Eq. 81.
@@ -189,6 +220,55 @@ class QuantileGalaxyPowerSpectrumMultipolesTheory(BasePowerSpectrumTheory):
             )
             for quantile in resolved_quantiles
         }
+
+    def marginalized_design_matrix(
+        self,
+        parameters: Mapping[str, float] | None = None,
+        *,
+        parameter_names: tuple[str, ...] | list[str] | None = None,
+        quantiles: tuple[int, ...] | list[int] | None = None,
+        **kwargs: float,
+    ) -> np.ndarray:
+        """Return flattened linear templates for analytically marginalized density-split terms."""
+        query = normalize_flat_query(parameters, kwargs)
+        nuisance_params, cosmology_params = self._split_query(query)
+        state = self.template.resolve(cosmology_params)
+        linear_input = state.linear_input
+        pk_linear = _interpolate_linear_power(self.k, linear_input.k, linear_input.pk_linear)
+        window = smoothing_kernel(
+            self.k,
+            radius_hmpc=self.smoothing_radius_hmpc,
+            h=linear_input.h,
+            kind=self.smoothing_kernel_kind,
+        )
+        bq_template, beta_template = _linear_templates(
+            pk_linear=pk_linear,
+            smoothing=window,
+            growth_rate=linear_input.growth_rate,
+            b1=nuisance_params["b1"],
+        )
+
+        resolved_quantiles = _normalize_quantiles(quantiles)
+        valid_names = [f"{base}{quantile}" for quantile in resolved_quantiles for base in ("bq", "beta")]
+        names = list(self.params.marginalized_names()) if parameter_names is None else [str(name) for name in parameter_names]
+        invalid = sorted(set(names) - set(valid_names))
+        if invalid:
+            raise ValueError(f"Unsupported density-split marginalized parameters: {', '.join(invalid)}.")
+
+        n_quantiles = len(resolved_quantiles)
+        n_ells = 3
+        n_k = self.k.size
+        columns = []
+        for name in names:
+            column = np.zeros((n_quantiles, n_ells, n_k), dtype=float)
+            prefix = "bq" if name.startswith("bq") else "beta"
+            quantile = int(name.removeprefix(prefix))
+            quantile_index = resolved_quantiles.index(quantile)
+            column[quantile_index, :, :] = bq_template if prefix == "bq" else beta_template
+            columns.append(column.reshape(-1))
+        if not columns:
+            return np.zeros((n_quantiles * n_ells * n_k, 0), dtype=float)
+        return np.column_stack(columns)
 
     def __call__(
         self,

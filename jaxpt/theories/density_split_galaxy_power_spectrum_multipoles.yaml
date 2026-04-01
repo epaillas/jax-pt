@@ -8,60 +8,70 @@ parameters:
       max: 4.0
   bq1:
     value: -1.6
+    marginalized: true
     prior:
       type: flat
       min: -4.0
       max: 4.0
   bq2:
     value: -0.8
+    marginalized: true
     prior:
       type: flat
       min: -4.0
       max: 4.0
   bq3:
     value: 0.0
+    marginalized: true
     prior:
       type: flat
       min: -4.0
       max: 4.0
   bq4:
     value: 0.8
+    marginalized: true
     prior:
       type: flat
       min: -4.0
       max: 4.0
   bq5:
     value: 1.6
+    marginalized: true
     prior:
       type: flat
       min: -4.0
       max: 4.0
   beta1:
     value: -0.8
+    marginalized: true
     prior:
       type: flat
       min: -3.0
       max: 3.0
   beta2:
     value: -0.4
+    marginalized: true
     prior:
       type: flat
       min: -3.0
       max: 3.0
   beta3:
     value: 0.0
+    marginalized: true
     prior:
       type: flat
       min: -3.0
       max: 3.0
   beta4:
     value: 0.4
+    marginalized: true
     prior:
       type: flat
       min: -3.0
       max: 3.0
   beta5:
     value: 0.8
+    marginalized: true
     prior:
       type: flat
       min: -3.0
