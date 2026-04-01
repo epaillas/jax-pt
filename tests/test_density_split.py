@@ -32,8 +32,8 @@ def test_density_split_parameter_loader_preserves_defaults_and_priors() -> None:
     assert params["beta5"].value == 0.8
     assert params["bq3"].prior == {"type": "flat", "min": -4.0, "max": 4.0}
     assert params["beta3"].prior == {"type": "flat", "min": -3.0, "max": 3.0}
-    assert params["bq1"].marginalized is True
-    assert params["beta5"].marginalized is True
+    assert params["bq1"].marginalized is False
+    assert params["beta5"].marginalized is False
 
 
 def test_density_split_theory_without_arguments_uses_default_parameter_configuration() -> None:
@@ -93,30 +93,6 @@ def test_density_split_predict_quantiles_can_return_components() -> None:
     assert prediction.metadata["quantile"] == 2
     assert prediction.components is not None
     assert set(prediction.components) == {"density_density", "mixed_rsd", "rsd_rsd", "smoothing_kernel", "linear_power"}
-
-
-def test_density_split_marginalized_design_matrix_matches_finite_difference_templates() -> None:
-    theory = QuantileGalaxyPowerSpectrumMultipolesTheory(
-        template=PowerSpectrumTemplate.from_linear_input(_linear_input(), settings=PTSettings(ir_resummation=False)),
-        k=np.linspace(0.02, 0.18, 5),
-    )
-    params = theory.nuisance_parameters.defaults_dict()
-    design = theory.marginalized_design_matrix(params, parameter_names=("bq2", "beta2"))
-    baseline = theory(params)
-
-    delta = 1.0e-6
-    for column_index, name in enumerate(("bq2", "beta2")):
-        shifted = dict(params)
-        shifted[name] += delta
-        derivative = (theory(shifted) - baseline) / delta
-        np.testing.assert_allclose(
-            design[:, column_index],
-            derivative.reshape(-1),
-            rtol=1e-5,
-            atol=1e-5,
-        )
-
-
 def test_density_split_theory_rejects_unknown_parameters() -> None:
     theory = QuantileGalaxyPowerSpectrumMultipolesTheory(
         template=PowerSpectrumTemplate.from_linear_input(_linear_input(), settings=PTSettings(ir_resummation=False)),
